@@ -1,0 +1,6 @@
+[submodule "LLMs-from-scratch"]
+	path = LLMs-from-scratch
+	url = git@github.com:rasbt/LLMs-from-scratch.git
+[submodule "minimind"]
+	path = minimind
+	url = git@github.com:jingyaogong/minimind.git
