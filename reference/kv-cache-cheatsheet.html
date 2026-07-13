@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KV Cache — 快速参考</title>
+<link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+<div class="container">
+
+<h1>🗂️ KV Cache 速查</h1>
+
+<h2>核心公式</h2>
+
+<div class="diagram">无 Cache:  KV 总计算量 ∝ n(n+1)/2  ≈ O(n²)
+有 Cache:  KV 总计算量 ∝ n            ≈ O(n)
+
+n 为生成 token 总数
+
+每 token 新增 cache = 2 × num_layers × num_heads × head_dim × dtype_bytes</div>
+
+<h2>每步做什么</h2>
+
+<table>
+  <tr><th>阶段</th><th>操作</th><th>Q</th><th>K</th><th>V</th></tr>
+  <tr><td>Prefill</td><td>整条 prompt 一次算完</td><td>全算（用完扔）</td><td>全算→存</td><td>全算→存</td></tr>
+  <tr><td>Decode 第 t 步</td><td>生成第 t+1 个词</td><td>只算新的（用完扔）</td><td>只算新的→追加</td><td>只算新的→追加</td></tr>
+  <tr><td>Attention</td><td>Q_new × [K_cache, K_new]</td><td>—</td><td>从 cache 取全部</td><td>从 cache 取全部</td></tr>
+</table>
+
+<h2>内存估算公式</h2>
+
+<pre><code>KV_Cache_size = 2 × num_layers × num_heads × head_dim × seq_len × dtype_bytes
+
+举例：LLaMA 7B, 4K seq, float16
+  = 2 × 32 × 32 × 128 × 4096 × 2
+  = 2 × 32 × 32 × 128 × 4096 × 2
+  = 2,147,483,648 bytes
+  = 2 GB</code></pre>
+
+<h2>关键设计选择</h2>
+
+<table>
+  <tr><th>选择</th><th>Cache 省多少</th><th>谁在用</th></tr>
+  <tr><td>MHA（原始多头）</td><td>基准</td><td>GPT-2, BERT</td></tr>
+  <tr><td>MQA（多查询）</td><td>~1/8</td><td>PaLM, Falcon</td></tr>
+  <tr><td>GQA（分组查询）</td><td>~1/2 ~ 1/8</td><td><strong>LLaMA 2/3, Mistral, Qwen2</strong></td></tr>
+</table>
+
+<h2>典型瓶颈</h2>
+
+<table>
+  <tr><th>阶段</th><th>瓶颈</th><th>优化方向</th></tr>
+  <tr><td>Prefill</td><td>Compute-bound（算力）</td><td>Flash Attention, 并行度</td></tr>
+  <tr><td>Decode</td><td>Memory-bound（带宽）</td><td>GQA/MQA, PageAttention, KV 量化</td></tr>
+</table>
+
+<h2>相关术语</h2>
+
+<table>
+  <tr><th>术语</th><th>定义</th></tr>
+  <tr><td>Prefill</td><td>首次 token 生成：整条 prompt 一次算完，填满 KV Cache</td></tr>
+  <tr><td>Decode</td><td>逐 token 生成：每步只算 1 个新 token，追加 Cache</td></tr>
+  <tr><td>Streaming LLM</td><td>只保留最近 N 个 token 的 KV Cache，丢弃中间历史</td></tr>
+  <tr><td>PageAttention</td><td>vLLM 的 KV Cache 管理：像虚拟内存一样分页管理，减少碎片</td></tr>
+  <tr><td>KV 量化</td><td>把 Cache 里的 float 压缩成 int8/int4，省显存</td></tr>
+</table>
+
+</div>
+</body>
+</html>

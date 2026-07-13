@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KV Cache — LLM 推理的核心优化</title>
+<link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+<div class="container">
+
+<h1>🗂️ KV Cache</h1>
+<p class="meta">
+  <span class="tag tag-cyan">lesson 0001</span>
+  <span>阶段 3 — GPT 架构 · 推理优化</span>
+</p>
+
+<p>KV Cache 是让 LLM 生成文本 <strong>不重新计算历史 K/V</strong> 的核心优化。没有它，生成 2000 个 token 的 Attention 计算量是 O(n²)，有了它降到 O(n)。</p>
+
+<hr>
+
+<h2>1. 问题：Train vs Inference 的差异</h2>
+
+<p><strong>训练时</strong>：一次输入整句话，所有位置<strong>并行</strong>计算 Attention，效率极高。</p>
+
+<p><strong>推理生成时</strong>：一个字一个字往外蹦，序列每步 +1。</p>
+
+<pre><code>训练（并行）：  ["Hello", "how", "are", "you"] → 4 个位置一起算
+推理（串行）：  输入 "Hello"    → 输出 "how"
+               输入 "Hello how" → 输出 "are"
+               输入 "Hello how are" → 输出 "you"</code></pre>
+
+<p><strong>最笨的做法</strong>：每步重新计算所有历史位置的 QKV。第 n 步时，你算第 1 步的 K 算到第 n 步的 K，但第 1 步到第 n-1 步的 K 跟上次结果一模一样——<strong>白算</strong>。</p>
+
+<h3>复杂度分析</h3>
+
+<table>
+  <tr><th>步骤</th><th>无 Cache</th><th>有 Cache</th></tr>
+  <tr><td>第 1 步</td><td>算 K₁, V₁</td><td>算 K₁, V₁ → 存 cache</td></tr>
+  <tr><td>第 2 步</td><td>算 K₁, V₁ <strong>+</strong> K₂, V₂</td><td>只算 K₂, V₂ → 追加到 cache</td></tr>
+  <tr><td>第 3 步</td><td>算 K₁, V₁ + K₂, V₂ <strong>+</strong> K₃, V₃</td><td>只算 K₃, V₃ → 追加到 cache</td></tr>
+  <tr><td>第 n 步</td><td><strong>n 次</strong> KV 计算</td><td><strong>1 次</strong> KV 计算</td></tr>
+</table>
+
+<div class="diagram">累计 KV 层计算量对比：
+无 Cache: 1 + 2 + 3 + ... + n = n(n+1)/2  ≈ O(n²)
+有 Cache: 1 + 1 + 1 + ... + 1 = n          ≈ O(n)
+
+n=2000: 无 Cache ≈ 2,001,000 次 KV 计算
+        有 Cache ≈     2,000 次 KV 计算</div>
+
+<div class="callout tip">
+  <strong>核心洞察</strong>：Attention 的 Q×K^T 点数计算量没变（每步还是算 n 个点积），但 K 和 V <em>本身的生成</em>从 O(n²) 降到 O(n)。实际推理中 KV 生成是瓶颈，因为涉及整个 Linear 层的矩阵乘。
+</div>
+
+<hr>
+
+<h2>2. 具体怎么运作</h2>
+
+<h3>2.1 每步存什么</h3>
+
+<p>每个 Attention 头的 K 和 V 都要存。Q 不存——每次生成新 token 需要全新的 Q。</p>
+
+<pre><code>模型：hidden_size=768, num_heads=8, head_dim=96
+
+每生成 1 个 token（1 层）：
+    新 K  = 8 头 × 96 = 768 个数字
+    新 V  = 8 头 × 96 = 768 个数字
+    每层新增 = 1,536 个 float
+
+8 层（minimind）：
+    每步新增 = 8 × 1,536 = 12,288 个 float ≈ 48KB (float32)
+    生成 2000 词 → 约 96MB</code></pre>
+
+<h3>2.2 细粒度步骤</h3>
+
+<ol>
+  <li><strong>Prefill 阶段</strong>：第一次输入整条 prompt（比如用户的问题 "中国的首都是"），一次算完所有位置的 K 和 V，存入 cache</li>
+  <li><strong>生成第 1 个 token</strong>：只用新来的 Q 对 cache 里的所有 K 做 Attention → 产出 "北京"</li>
+  <li><strong>追加 cache</strong>：算 "北京" 这个位置的 K_new, V_new → 追加到 cache</li>
+  <li><strong>生成第 2 个 token</strong>：用新的 Q 对 cache（原 prompt + "北京"）做 Attention → 产出 "是"</li>
+  <li>重复直到遇到结束符或达到 max_tokens</li>
+</ol>
+
+<h3>2.3 Prefill vs Decode</h3>
+
+<table>
+  <tr><th></th><th>Prefill（首个 token）</th><th>Decode（后续 token）</th></tr>
+  <tr><td>输入</td><td>整条 prompt（如 200 个 token）</td><td>1 个新 token</td></tr>
+  <tr><td>KV Cache</td><td>空 → 填满所有 prompt 位置</td><td>已有 → 每次追加 1 个</td></tr>
+  <tr><td>计算</td><td>高吞吐（批量并行）</td><td>低吞吐（串行 1 个）</td></tr>
+  <tr><td>瓶颈</td><td>算力</td><td><strong>内存带宽</strong>（读 cache）</td></tr>
+</table>
+
+<div class="callout warn">
+  <strong>实际推理中 Decode 是更慢的阶段</strong>——虽然只算 1 个新 token，但 Attention 要把新 Q 跟 cache 里<em>所有</em> K 做点积。序列长了之后，读 cache 的内存带宽成为瓶颈。这就是为什么 <strong>Flash Attention</strong> 这类优化主要加速 Decode 阶段。
+</div>
+
+<hr>
+
+<h2>3. 内存消耗——为什么上下文窗口有限</h2>
+
+<div class="card">
+  <div class="card-title">典型模型 KV Cache 内存估算</div>
+  <table>
+    <tr><th>模型</th><th>层数</th><th>dim</th><th>头数</th><th>每 token/层</th><th>4K 上下文</th><th>8K 上下文</th></tr>
+    <tr><td>minimind</td><td>8</td><td>768</td><td>8</td><td>6KB</td><td>24MB</td><td>48MB</td></tr>
+    <tr><td>GPT-2 124M</td><td>12</td><td>768</td><td>12</td><td>12KB</td><td>48MB</td><td>96MB</td></tr>
+    <tr><td>LLaMA 7B</td><td>32</td><td>4096</td><td>32</td><td>1MB</td><td>4GB</td><td>8GB</td></tr>
+    <tr><td>LLaMA 70B</td><td>80</td><td>8192</td><td>64</td><td>5MB</td><td>20GB</td><td>40GB</td></tr>
+  </table>
+</div>
+
+<p>这就是为什么：</p>
+<ul>
+  <li><strong>70B 模型跑 32K 上下文需要 160GB+ 显存</strong>（仅 KV Cache 就超出单张 A100 80GB）</li>
+  <li><strong>Multi-Query Attention (MQA)</strong> 和 <strong>Grouped-Query Attention (GQA)</strong> 被发明——多个 Q 头共享同一组 K/V，cache 降到 1/8</li>
+  <li>这是推理优化（vLLM、TensorRT-LLM）的核心战场——管理 KV Cache 内存</li>
+</ul>
+
+<hr>
+
+<h2>4. 与已学知识的连接</h2>
+
+<table>
+  <tr><th>已学概念</th><th>跟 KV Cache 的关系</th></tr>
+  <tr><td><a href="#">RoPE 位置编码</a></td><td>旋转<strong>在入 Cache 前完成</strong>，Cache 存的已经是旋转后的 K</td></tr>
+  <tr><td><a href="#">Causal Attention</a></td><td>Causal mask 在生成时自然满足——新 token 永远只 attend 到已有的历史</td></tr>
+  <tr><td><a href="#">Multi-Head Attention</a></td><td>每个头独立维护自己的 KV Cache</td></tr>
+  <tr><td><a href="#">GPT Block 组装</a></td><td>每层 Block 都有自己独立的 KV Cache，不跨层共享</td></tr>
+  <tr><td><a href="#">QKV 计算</a></td><td>只有 Q 每步全重新算；K 和 V 只算新来的</td></tr>
+</table>
+
+<hr>
+
+<h2>5. 通俗类比</h2>
+
+<table>
+  <tr><th>场景</th><th>无 KV Cache</th><th>有 KV Cache</th></tr>
+  <tr><td>写论文</td><td>每写一章，重读前面所有章节</td><td>每章贴墙上，写新章只看墙上贴的</td></tr>
+  <tr><td>开会</td><td>每次发言前全场重新自我介绍</td><td>第一次记在本上，后面只看本</td></tr>
+  <tr><td>做菜</td><td>每加一味调料重做之前所有步骤</td><td>每步做完先盛出来备着</td></tr>
+</table>
+
+<hr>
+
+<h2>6. 关键点总结</h2>
+
+<table>
+  <tr><th>特性</th><th>值</th></tr>
+  <tr><td>什么被 Cache</td><td>每层每个 Attention 头的 K 和 V</td></tr>
+  <tr><td>什么不 Cache</td><td>Q（用完就扔）</td></tr>
+  <tr><td>省什么</td><td>避免重复计算历史 K/V（O(n²)→O(n)）</td></tr>
+  <tr><td>代价</td><td>显存占用与序列长度成正比</td></tr>
+  <tr><td>在哪用</td><td>Decoder-only 自回归生成（GPT, LLaMA, Qwen）</td></tr>
+  <tr><td>Cache 生命周期</td><td>一次对话/生成任务的整个周期</td></tr>
+  <tr><td>跨层共享？</td><td>不，每层独立</td></tr>
+</table>
+
+<p>一句话：<strong>每次生成新词时不重新计算历史位置的 K 和 V，存起来复用。用内存换速度。</strong></p>
+
+<hr>
+
+<h2>7. 推荐阅读</h2>
+<ul>
+  <li><strong>minimind</strong> 源码：在 model.py 的 generate 函数中看 KV Cache 的具体实现</li>
+  <li><strong>The Illustrated Transformer</strong>（Jay Alammar）— Inference 章节</li>
+  <li><strong>LLMs-from-scratch ch04</strong>— GPT 模型实现含 KV Cache 逻辑</li>
+</ul>
+
+<p style="margin-top: 24px; color: var(--text-dim); font-style: italic;">有什么不清楚的？找 Fairy 追问。Prefill vs Decode 的详细对比、多轮对话 KV Cache 管理、GQA/MQA、Flash Attention 跟 KV Cache 的配合——随时可以继续挖。</p>
+
+</div>
+</body>
+</html>

@@ -2,7 +2,7 @@
 
 ## 教学风格
 
-- **最土的比喻优先**—比如 RoPE 像转风扇，QKV 像查字典
+- **最土的比喻优先**—比如 RoPE 像转风扇，QKV 像查字典，KV Cache 像写论文贴墙上
 - **具体数字算例**—每一步：输入什么 → 怎么算 → 输出什么
 - **表格对比**—多个概念并列时用表格
 - **不要跳过基础概念**—如果牵涉到数学概念，先解释数学再解释 ML
@@ -17,18 +17,20 @@
 ## 知识现状
 
 ### 已掌握
-- LLM 训练三阶段：Pretrain → SFT → RLHF/DPO
-- Tokenizer：BPE 原理、ByteLevel、词表大小权衡
-- Embedding：Token Embedding vs 独立 Embedding 模型、权重绑定
-- RoPE：旋转位置编码、二维配对旋转、高频 vs 低频
-- NTK/YaRN：上下文窗口扩展原理、维度频率分布
-- QKV：Query/Key/Value 的计算与 Attention 本质
-- Causal Attention：因果 mask 的原理
-- Multi-Head Attention：多头并行的分工与实现
+- ✅ LLM 训练三阶段：Pretrain → SFT → RLHF/DPO
+- ✅ Tokenizer：BPE 原理、ByteLevel、词表大小权衡
+- ✅ Embedding：Token Embedding vs 独立 Embedding 模型、权重绑定
+- ✅ RoPE：旋转位置编码、二维配对旋转、高频 vs 低频、窗口扩展
+- ✅ NTK/YaRN：上下文窗口扩展原理、维度频率分布
+- ✅ QKV：Query/Key/Value 的计算与 Attention 本质
+- ✅ Causal Attention：因果 mask 的原理
+- ✅ Multi-Head Attention：多头并行的分工与实现
+- ✅ GPT Transformer Block：Pre-Norm → Attention + 残差 → FFN + 残差
+- ✅ RMSNorm：除 RMS 归一化，不减均值
+- ✅ FFN/SwiGLU：门控前馈网络，W_gate/W_up/W_down 三权重
+- ✅ **KV Cache**：推理时不重算历史 K/V，用内存换速度
 
 ### 待学（按优先级）
-1. GPT 完整架构（LayerNorm、FFN、残差连接）
-2. KV Cache 原理
-3. Pretrain 训练循环
-4. SFT / LoRA
-5. DPO / GRPO
+1. Pretrain 训练循环
+2. SFT / LoRA
+3. DPO / GRPO
