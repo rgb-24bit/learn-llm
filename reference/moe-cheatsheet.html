@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MoE 速查表</title>
+<link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+<div class="container">
+
+<h1>🏗️ MoE 速查</h1>
+
+<h2>一句话</h2>
+<p><strong>把 FFN 拆成多个专家，每步只激活 Top-K 个。</strong> 差异只发生在 FFN，Attention 不变，KV Cache 不变。</p>
+
+<h2>架构对比</h2>
+
+<table>
+  <tr><th></th><th>Dense</th><th>MoE</th></tr>
+  <tr><td>FFN</td><td>1 个大的</td><td>N 个小的（专家）</td></tr>
+  <tr><td>激活</td><td>全部参数</td><td>Top-K 专家</td></tr>
+  <tr><td>每层独不独立</td><td>—</td><td><strong>每层有一套独立专家</strong></td></tr>
+  <tr><td>Router</td><td>—</td><td>Linear(hidden, num_experts) → softmax → Top-K</td></tr>
+  <tr><td>专家分工</td><td>—</td><td><strong>训练中自然涌现</strong>，非人为预设</td></tr>
+  <tr><td>KV Cache</td><td>有</td><td>同 Dense（不受影响）</td></tr>
+</table>
+
+<h2>Router 计算流程</h2>
+
+<pre><code>输入 x (d维)
+  → x @ W_router (d × num_experts) → 原始分数
+  → softmax → 概率分布
+  → topk(k=num_experts_per_tok) → 选中专家编号 + 权重
+  → 归一化权重 → 分发给对应专家 → 加权合并输出</code></pre>
+
+<h2>关键代价</h2>
+
+<table>
+  <tr><th>代价</th><th>说明</th><th>缓解方案</th></tr>
+  <tr><td>显存占用大</td><td>所有专家必须加载到 GPU</td><td>GQA/MQA、KV 量化、FP8</td></tr>
+  <tr><td>负载不均衡</td><td>Router 倾向选同样几个专家</td><td>Load Balancing Loss</td></tr>
+  <tr><td>通信开销</td><td>不同 GPU 间传输 token</td><td>Expert Parallelism、all-to-all</td></tr>
+</table>
+
+<h2>工业 vs 教学实现</h2>
+
+<table>
+  <tr><th></th><th>Mixtral 8×7B</th><th>minimind</th></tr>
+  <tr><td>num_experts</td><td>8</td><td>4</td></tr>
+  <tr><td>num_experts_per_tok</td><td>2</td><td>1 (Top-1)</td></tr>
+  <tr><td>noisy gating</td><td>有</td><td>无</td></tr>
+  <tr><td>expert capacity</td><td>有</td><td>无</td></tr>
+  <tr><td>aux_loss coef</td><td>0.01</td><td>5e-4</td></tr>
+</table>
+
+<h2>关键术语</h2>
+
+<table>
+  <tr><th>术语</th><th>含义</th></tr>
+  <tr><td>Router/Gate</td><td>决定 token 去哪个专家的线性层</td></tr>
+  <tr><td>Expert</td><td>一个独立的小 FFN（gate/up/down 三层）</td></tr>
+  <tr><td>Top-K</td><td>每 token 激活 K 个得分最高的专家</td></tr>
+  <tr><td>Aux Loss / Load Balance Loss</td><td>防止 Router 垄断的惩罚项</td></tr>
+  <tr><td>Shared Expert</td><td>DeepSeek 方案：每个 token 必经的通用专家</td></tr>
+  <tr><td>Fine-Grained Expert</td><td>DeepSeek 方案：拆得更细的专家（64~160 个）</td></tr>
+</table>
+
+</div>
+</body>
+</html>

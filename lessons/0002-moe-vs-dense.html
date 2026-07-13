@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MoE vs Dense — 混合专家模型架构</title>
+<link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+<div class="container">
+
+<h1>🏗️ MoE vs Dense——混合专家模型架构</h1>
+<p class="meta">
+  <span class="tag tag-cyan">lesson 0002</span>
+  <span>阶段 3 — GPT 架构 · MoE</span>
+</p>
+
+<p>MoE（Mixture of Experts）是当前 LLM 架构的最大分水岭之一——Dense 模型每步激活所有参数，MoE 每步只激活一部分「专家」。两者差异 <strong>只发生在 FFN 层，Attention 部分完全一致</strong>。</p>
+
+<hr>
+
+<h2>1. 核心差异：只改 FFN</h2>
+
+<div class="diagram">Dense Block:
+输入 → Pre-Norm → Attention → +残差 → Pre-Norm → [        FFN        ] → +残差
+                                                ↑     全部参数激活      
+
+MoE Block:
+输入 → Pre-Norm → Attention → +残差 → Pre-Norm → [ Router → Top-K 专家 ] → +残差
+                                                ↑    只激活 2/8 的参数</div>
+
+<p>为什么只能改 FFN？</p>
+<table>
+  <tr><th></th><th>Attention</th><th>FFN</th></tr>
+  <tr><td>依赖其他位置？</td><td><strong>依赖</strong>（需全部历史的 K/V）</td><td><strong>不依赖</strong>（只看自己）</td></tr>
+  <tr><td>拆专家可行？</td><td>不可行</td><td><strong>可行</strong></td></tr>
+  <tr><td>作用</td><td>收集邻居信息（开会）</td><td>独立加工信息（消化）</td></tr>
+</table>
+
+<hr>
+
+<h2>2. MoE 核心机制</h2>
+
+<h3>Router（路由器）</h3>
+<p>一个简单线性层：<code>W_router: hidden_size → num_experts</code>。输入 token 向量，输出每个专家的得分，softmax 转概率后取 Top-K。</p>
+
+<div class="diagram">Router 流程：
+输入 x (768维) → x × W_router (768×8) → 8 个 logit → softmax → [0.02, 0.78, 0.01, ...]
+                                                                       ↑
+                                                                  选 Top-2</div>
+
+<h3>专家分工是自然涌现的</h3>
+<ul>
+  <li>初始化时所有专家参数随机，<strong>无预设角色</strong></li>
+  <li>训练中相似的 token 倾向于走相同专家 → 该专家参数朝该方向调整</li>
+  <li>训练完成 → 专家自然分化：语法专家、科学专家、情感专家……</li>
+  <li>角色名称是人类事后贴的标签，不是人预设的</li>
+</ul>
+
+<h3>每层独立</h3>
+<p>Block 0 的 8 个专家和 Block 1 的 8 个专家是<strong>完全独立</strong>的不同参数。32 层 × 8 专家 = 256 个专家。浅层专家处理语法/短语，深层专家处理语义/推理。</p>
+
+<hr>
+
+<h2>3. 关键对比</h2>
+
+<table>
+  <tr><th></th><th>Dense (LLaMA 7B)</th><th>MoE (Mixtral 8×7B)</th><th>DeepSeek MoE</th></tr>
+  <tr><td>FFN 结构</td><td>1 个巨型 FFN</td><td>8 个专家</td><td>64~160 个细分专家</td></tr>
+  <tr><td>每步激活比例</td><td>100%</td><td>~25%（Top-2/8）</td><td>~9%（Top-6/64）</td></tr>
+  <tr><td>总参数量</td><td>基准</td><td>更大（~47B vs ~7B）</td><td>更大（~671B vs ~67B）</td></tr>
+  <tr><td>推理速度</td><td>基准</td><td>更快（激活少）</td><td>更快</td></tr>
+  <tr><td>显存需求</td><td>基准</td><td><strong>大得多</strong>（需加载所有专家）</td><td>更大</td></tr>
+  <tr><td>共享专家</td><td>—</td><td>无</td><td><strong>有</strong>（每个 token 必经）</td></tr>
+  <tr><td>KV Cache</td><td>受影响</td><td colspan="2"><strong>不受影响</strong>（只改 FFN）</td></tr>
+</table>
+
+<hr>
+
+<h2>4. Load Balancing Loss（负载均衡损失）</h2>
+
+<p>如果不加控制，Router 会偷懒——所有 token 密集选 2~3 个专家，其他闲置。解法是在 loss 中加入惩罚项：</p>
+
+<pre><code>aux_loss = (每个专家被选中的比例 × 每个专家的平均 Router 概率).sum()
+            × num_experts × coef</code></pre>
+
+<p>某个专家被滥用 → 选中比例高 → loss 变大 → Router 被惩罚 → 下次分给其他专家。</p>
+
+<hr>
+
+<h2>5. minimind 的 MoE 实现（简化教学版）</h2>
+
+<table>
+  <tr><th>特性</th><th>Mixtral（工业）</th><th>minimind（教学）</th></tr>
+  <tr><td>专家数</td><td>8</td><td>4</td></tr>
+  <tr><td>Top-K</td><td>2</td><td><strong>1</strong></td></tr>
+  <tr><td>噪声训练</td><td>有</td><td>无</td></tr>
+  <tr><td>专家容量限制</td><td>有</td><td>无</td></tr>
+</table>
+
+<p>minimind 的 MOEFeedForward 核心逻辑仅 28 行：Router（线性层）+ 专家池（ModuleList 4 个 FFN）+ 遍历分派 + aux_loss 计算。<a href="https://github.com/jingyaogong/minimind/blob/main/model/model_minimind.py">查看源码</a></p>
+
+<hr>
+
+<h2>6. 跟已学知识的连接</h2>
+<ul>
+  <li><a href="0001-kv-cache.html">KV Cache</a>——MoE 不影响 KV Cache，因为只改 FFN</li>
+  <li><a href="#">GPT Block 组装</a>——Dense Block 中 FFN = FeedForward，MoE Block 中 FFN = MOEFeedForward，其他一样</li>
+  <li><a href="#">FFN/SwiGLU</a>——每个专家就是一个标准 SwiGLU</li>
+</ul>
+
+<hr>
+
+<h2>7. 推荐阅读</h2>
+<ul>
+  <li><strong>minimind</strong> model_minimind.py——28 行 MoE 核心代码</li>
+  <li><strong>Mixtral of Experts</strong> (Mistral AI) — MoE 工业部署论文</li>
+  <li><strong>DeepSeek-V2</strong> — 细粒度专家 + 共享专家 + MLA 的完整方案</li>
+  <li>《Outrageously Large Neural Networks》(Shazeer et al., 2017) — MoE 原始论文</li>
+</ul>
+
+<p style="margin-top: 24px; color: var(--text-dim); font-style: italic;">有什么不清楚的找 Fairy 追问——Router 训练细节、DeepSeek 的 MLA 如何进一步减小 KV Cache、MoE 分布式部署的通信开销——随时继续挖。</p>
+
+</div>
+</body>
+</html>
