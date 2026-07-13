@@ -31,6 +31,7 @@
 - ✅ **KV Cache**：推理时不重算历史 K/V，用内存换速度
 - ✅ **MoE vs Dense**：差异仅在 FFN 层，Router + 多专家 + Load Balancing Loss
 - ✅ **minimind MoE 实现**：4 专家 Top-1，28 行核心逻辑
+- ✅ **Scaling Law**：PPL ∝ N^(-0.076)，Chinchilla 1:20 法则，边际递减
 
 ### 待学（按优先级）
 1. Pretrain 训练循环
