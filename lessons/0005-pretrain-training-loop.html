@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pretrain 训练循环 — 模型到底是怎么练出来的</title>
+<link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+<div class="container">
+
+<h1>⚙️ Pretrain 训练循环</h1>
+<p class="meta">
+  <span class="tag tag-cyan">lesson 0005</span>
+  <span>阶段 3 — 训练机制 · 核心流程</span>
+</p>
+
+<p>你已经知道了 GPT Block 的结构、Attention 的原理、Loss 怎么算。但 —— 所有这些是怎么<strong>凑在一起跑起来</strong>的？</p>
+
+<p>这一课带你完整走一遍<strong>一个训练步</strong>：从数据进来到参数更新。</p>
+
+<hr>
+
+<h2>0. 先想想全局</h2>
+
+<p>你之前学过了 LLM 训练三阶段：Pretrain → SFT → DPO。这一课只说 Pretrain。</p>
+
+<p>Pretrain 的目标极其简单：<strong>"给我看一堆文本，学会预测下一个词"</strong>。</p>
+
+<div class="callout info">
+<strong>关键理解</strong>：Pretrain 不需要任何人工标注数据。互联网上的所有文本都是天然训练材料——每句话的"下一个词"就是标签。这是 LLM 能规模化的根本原因。
+</div>
+
+<p>好的，现在我们用一个具体模型（minimind 64M）走一遍训练过程。</p>
+
+<hr>
+
+<h2>1. 数据准备：文本 → 数字</h2>
+
+<p>原始数据是纯文本，比如维基百科的一段文章。第一步：</p>
+
+<ul>
+  <li>Tokenizer（BPE）把文本切成 token ID 序列</li>
+  <li>每段截断或填充到固定长度（minimind 用 340 个 token）</li>
+  <li>最后一批数据长这样：<code>[32 × 340]</code> —— 一次取 32 段文本，每段 340 个数字</li>
+</ul>
+
+<p>训练时，输入就是 <code>input_ids</code>，标签就是右移一位的 <code>input_ids</code>：</p>
+
+<pre><code>文本原文："今天天气真好"（假设 token = [101, 102, 103, 104, 105]）
+
+input_ids:  [101] [102] [103] [104] [105]
+labels:     [102] [103] [104] [105] [PAD]
+              ↑     ↑     ↑     ↑
+              模型任务：每个位置预测下一个 token</code></pre>
+
+<p align="center"><em>模型在位置 1 看到 [101]，要预测 [102] 是"天气"；位置 2 看到 [102]，要预测 [103] 是"真好"…</em></p>
+
+<hr>
+
+<h2>2. 前向传播：数据流过模型</h2>
+
+<p>拿到一个 batch 后，一次前向传播走到底：</p>
+
+<pre><code>input_ids → [32 × 340]
+    │
+    ▼
+Token Embedding → [32 × 340 × 768]
+（每个 token ID 查表，变成 768 维向量）
+    │
+    ▼
++ Position Embedding (RoPE, 在 Attention 里旋转)
+    │
+    ▼
+× 8 层 Transformer Block (Pre-Norm → Attention + 残差 → FFN + 残差)
+    │
+    ▼
+RMSNorm → [32 × 340 × 768]
+    │
+    ▼
+lm_head（线性层 768 → 6400）→ [32 × 340 × 6400]
+                                   ↑      ↑      ↑
+                                batch  位置   词表概率</code></pre>
+
+<p>最终输出 <strong>logits</strong>：一个巨大的 3 维数组。32 段 × 340 个位置 × 6400 个词表项。</p>
+
+<p><strong>每个位置的"6400 个值"</strong>，是模型对这个位置"下一个 token 应该是什么"的预测——哪个索引的数值越大，模型就越倾向于预测那个 token。</p>
+
+<hr>
+
+<h2>3. 算 Loss</h2>
+
+<p>现在模型输出了 logits（预测），你手上又有 labels（真实答案）——比一比差距有多大。</p>
+
+<h3>一个具体位置的例子</h3>
+
+<p>假设词表只有 5 个词 [猫, 狗, 吃, 鱼, 跑]。</p>
+
+<table>
+  <tr><th>位置</th><th>真实下一个 token</th><th>模型预测（概率分布）</th><th>loss 贡献</th></tr>
+  <tr>
+    <td>"猫"的位置</td>
+    <td><strong>"吃"</strong>（索引 2）</td>
+    <td>猫 0.1 / 狗 0.1 / <strong>吃 0.6</strong> / 鱼 0.1 / 跑 0.1</td>
+    <td>-ln(0.6) ≈ 0.51 ✓</td>
+  </tr>
+  <tr>
+    <td>"吃"的位置</td>
+    <td><strong>"鱼"</strong>（索引 3）</td>
+    <td>猫 0.4 / 狗 0.4 / 吃 0.05 / <strong>鱼 0.1</strong> / 跑 0.05</td>
+    <td>-ln(0.1) ≈ 2.3 ✗</td>
+  </tr>
+</table>
+
+<p>模型在"吃"位置预测错了——它觉得大概率是"猫"或"狗"（各 0.4），但正确答案是"鱼"（只有 0.1），所以 loss 高达 2.3。模型会受到大的惩罚。</p>
+
+<p>一个 batch 里所有位置加起来取平均，就是最终的 <strong>loss 值</strong>。</p>
+
+<div class="callout tip">
+<strong>直观理解</strong>：loss 相当于"模型有多困惑"。loss=2.3 相当于模型在 10 个选项里蒙（e²·³≈10），loss=0.1 相当于模型有 90% 以上的把握猜对。训练就是从"蒙"到"准"的过程。
+</div>
+
+<hr>
+
+<h2>4. 反向传播：让模型"知道"自己错了</h2>
+
+<p>Loss 是一个数字——比如 3.5。模型怎么利用这个数字来改进？</p>
+
+<p><strong>反向传播</strong>（backpropagation）：从 loss 出发，沿着网络往回走，逐层计算每个参数对 loss 的"贡献"有多大。</p>
+
+<p>用之前学过的知识分解：</p>
+
+<pre><code>顺序：loss → cross_entropy → lm_head → 最后一层 FFN → 最后一层 Attention
+       → 倒数第二层 FFN → 倒数第二层 Attention → ... → Embedding
+
+每个参数 W 得到一个梯度 g = ∂loss/∂W
+梯度的含义：W 增加一丢丢，loss 会变化多少
+梯度为正 → 参数往小了调（参数过大导致 loss 高）
+梯度为负 → 参数往大了调（参数过小导致 loss 高）</code></pre>
+
+<p>8 层 transformer 全部走一遍，每个参数都有一个梯度值。</p>
+
+<div class="callout warn">
+<strong>注意</strong>：训练时 <strong>不用 KV Cache</strong>。训练是整段文本并行计算的，不存在"重复计算历史位置"的问题。KV Cache 只在推理时用。
+</div>
+
+<hr>
+
+<h2>5. 梯度累积和更新</h2>
+
+<p>现在有了梯度。但直接更新参数有个问题：</p>
+
+<p>batch_size=32，这个数字太小了。用 32 个样本算出的梯度"噪声"很大，更新方向可能不准。但显存有限，一次放不下更大的 batch。</p>
+
+<p>解决方案：<strong>梯度累积</strong></p>
+
+<pre><code>step 1: forward + backward → 梯度 g₁（缓存，不更新）
+step 2: forward + backward → 梯度 g₂（累加到 g₁）
+step 3: forward + backward → 梯度 g₃（累加到 g₁+g₂）
+...
+step 8: forward + backward → 梯度 g₈（累加到前 7 步）
+        ↓
+        总梯度 = (g₁+g₂+...+g₈) / 8 ← 等效于 batch=32×8=256
+        裁剪梯度（超过 1.0 的截断到 1.0）
+        optimizer.step() → 更新参数
+        optimizer.zero_grad() → 清空梯度缓存
+        重新从 step 1 开始</code></pre>
+
+<p>用 8 步攒出的梯度更新一次——效果等价于 batch=256，但每步显存只用装 32 条数据。</p>
+
+<hr>
+
+<h2>6. 学习率衰减</h2>
+
+<p>训练开始时，参数离最优值很远，用大的学习率（5e-4）快步走。训练快结束时，参数已经很接近最优了，用小步慢走防止"跨过头"。</p>
+
+<p>minimind 用的<strong>余弦衰减</strong>：</p>
+
+<pre><code>初始学习率：5e-4（训练开始）
+最终学习率：5e-5（最高值的 10%）
+
+学习率变化类似一条余弦曲线——前半段基本持平，后半段逐渐下降。</code></pre>
+
+<table>
+  <tr><th>训练进度</th><th>学习率</th><th>行为</th></tr>
+  <tr><td>0%</td><td>5e-4</td><td>大步探索</td></tr>
+  <tr><td>25%</td><td>~5e-4</td><td>基本不变</td></tr>
+  <tr><td>50%</td><td>~4.5e-4</td><td>开始缓降</td></tr>
+  <tr><td>75%</td><td>~2.8e-4</td><td>明显下降</td></tr>
+  <tr><td>100%</td><td>5e-5</td><td>精细微调</td></tr>
+</table>
+
+<hr>
+
+<h2>7. 整个训练过程在时间上的样子</h2>
+
+<p>minimind 64M 的完整训练：</p>
+
+<pre><code>数据集：~2.1B token（约 600 万段文本，每段 340 token）
+总步数：约 24,000 step / epoch × 2 epochs = 48,000 步
+训练时间：约 1-2 天（单张 RTX 3090）
+
+loss 变化曲线：
+Epoch 1:
+  step 0:     loss ≈ 7.0  →  "对词表完全随机猜，ln(6400)≈8.8，还没开始学"
+  step 1,000: loss ≈ 5.0  →  "学了一些高频词：了、的、是"
+  step 5,000: loss ≈ 3.5  →  "基本语法学会了"
+  step 12,000:loss ≈ 2.5  →  "常见搭配掌握了"
+  step 24,000:loss ≈ 2.0  →  "第一遍过完"
+
+Epoch 2:
+  step 24,001:loss ≈ 2.0  →  "第二遍，同一批数据再看一次"
+  step 36,000:loss ≈ 1.5  →  "更精确了"
+  step 48,000:loss ≈ 1.2  →  "训练结束"</code></pre>
+
+<div class="callout info">
+<strong>思考一下</strong>：loss 从 7.0 降到 1.2，意味着模型对每个 token 的平均预测置信度从 0.09%（1/6400）提升到了 30%（e⁻¹·²≈0.3）。模型确实"学到"了语言规律，而不是死记硬背。
+</div>
+
+<hr>
+
+<h2>8. 回头看：你已经在脑子里走了一遍训练循环</h2>
+
+<div class="card">
+<div class="card-title">🔁 一个训练步的完整流程</div>
+<ol>
+  <li><strong>取数据</strong>：从数据集拿一个 batch（32 × 340 token IDs）</li>
+  <li><strong>前向</strong>：Embedding → 8×Block → lm_head → logits [32×340×6400]</li>
+  <li><strong>算 loss</strong>：交叉熵（预测 vs 真实下一个词）</li>
+  <li><strong>反向</strong>：从 loss 往回算每个参数的梯度</li>
+  <li><strong>累积</strong>：把梯度加到缓存里（每步都做）</li>
+  <li><strong>攒够 8 步后</strong>：裁剪梯度 → AdamW 更新参数 → 清梯度</li>
+  <li><strong>调学习率</strong>：按余弦衰减降低学习率</li>
+  <li><strong>打日志</strong>：每隔 100 步打印 loss，每隔 1000 步保存 checkpoint</li>
+  <li><strong>重复</strong>：走 48,000 步——模型就训练好了</li>
+</ol>
+</div>
+
+<hr>
+
+<h2>📚 推荐阅读</h2>
+<ul>
+  <li><strong>minimind 训练代码</strong>：<code>trainer/train_pretrain.py</code>（171 行，是整个教学实现中最核心的文件之一）</li>
+  <li><strong>LLMs-from-scratch ch05</strong>：Sebastian Raschka 的预训练章节，有完整的训练脚本</li>
+  <li><strong>The Annotated Transformer</strong>：<a href="http://nlp.seas.harvard.edu/2018/04/03/attention.html">http://nlp.seas.harvard.edu/2018/04/03/attention.html</a> — 如果对反向传播的数学细节感兴趣</li>
+</ul>
+
+<p>有任何不清楚的，随时问我！</p>
+
+<div class="nav-links">
+<p>📖 参考：<a href="../reference/pretrain-training-loop.html">Pretrain 训练流程速查</a></p>
+<p>📖 前置课程：<a href="../lessons/0004-multimodal-training.html">0004 — 多模态训练</a></p>
+</div>
+
+</div>
+</body>
+</html>

@@ -31,9 +31,9 @@
 - ✅ **KV Cache**：推理时不重算历史 K/V，用内存换速度
 - ✅ **图片/视频 Token 化**：ViT patch embedding，三种多模态连接方式
 - ✅ **多模态训练机制**：CLIP 对比学习、对齐→SFT 三阶段、模型三件套架构
+- ✅ **Pretrain 训练循环**：前向→Loss→反向→梯度累积→AdamW→学习率衰减，每个 step 的完整流程
 - ✅ **Scaling Law**：PPL ∝ N^(-0.076)，Chinchilla 1:20 法则，边际递减
 
 ### 待学（按优先级）
-1. Pretrain 训练循环
-2. SFT / LoRA
+1. SFT / LoRA
 3. DPO / GRPO

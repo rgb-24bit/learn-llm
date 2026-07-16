@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pretrain 训练流程速查 — 参考</title>
+<link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+<div class="container">
+
+<h1>⚙️ Pretrain 训练流程速查</h1>
+<p class="meta">
+  <span class="tag tag-blue">reference</span>
+  <span>阶段 3 — 训练机制</span>
+</p>
+
+<hr>
+
+<h2>单步训练流程</h2>
+
+<pre><code>┌─────────────────────────────────────────────────────────────┐
+│                   一 个 训 练 步 (step)                      │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ① 采样 batch：从数据集中取一批文本                          │
+│     → input_ids: [32 × 340]（32 段文本，每段 340 个 token）  │
+│     → labels: [32 × 340]（右移一位的 input_ids）             │
+│                                                             │
+│  ② 前向传播：input_ids → 模型 → logits                      │
+│     Embedding → 8×Block → lm_head → logits [32×340×6400]    │
+│                                                             │
+│  ③ 算 loss：logits vs labels → 交叉熵                       │
+│     logits[:, :-1, :] 预测 logits[:, 1:] 的真实 token       │
+│                                                             │
+│  ④ loss / accumulation_steps → backward → 梯度累积          │
+│     每步都反向传播，但只把梯度累加，不更新参数               │
+│                                                             │
+│  ⑤ 攒够 accumulation_steps 步：                             │
+│     a) 梯度裁剪（最大值限制在 1.0）                          │
+│     b) optimizer.step() — AdamW 用梯度更新参数              │
+│     c) optimizer.zero_grad() — 清空梯度                     │
+│     d) 更新学习率（余弦衰减）                                │
+│                                                             │
+│  ⑥ 每隔 N 步：打印 loss + 保存 checkpoint                   │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘</code></pre>
+
+<hr>
+
+<h2>Loss 计算细节</h2>
+
+<pre><code>input_ids:  [token₁][token₂][token₃][token₄]...[token₃₄₀]
+labels:          [token₂][token₃][token₄][token₅]...[PAD]
+
+模型预测：token₁ 的位置 → 预测 token₂ 的概率分布
+          token₂ 的位置 → 预测 token₃ 的概率分布
+          token₃ 的位置 → 预测 token₄ 的概率分布
+          ...
+
+每个位置输出一个 vocab_size 维的概率向量（6400 个值）
+loss 衡量："模型认为 token₂ 的概率" vs "实际就是 token₂"</code></pre>
+
+<hr>
+
+<h2>关键超参数速查</h2>
+
+<table>
+  <tr><th>参数</th><th>minimind 值</th><th>工业级（LLaMA 等）</th><th>什么意思</th></tr>
+  <tr>
+    <td>batch_size</td>
+    <td>32</td>
+    <td>1M~4M token</td>
+    <td>每次喂多少样本</td>
+  </tr>
+  <tr>
+    <td>accumulation_steps</td>
+    <td>8</td>
+    <td>1~8</td>
+    <td>攒几步梯度再更新</td>
+  </tr>
+  <tr>
+    <td>有效 batch</td>
+    <td>32×8=256</td>
+    <td>数万</td>
+    <td>实际用于更新的样本量</td>
+  </tr>
+  <tr>
+    <td>max_seq_len</td>
+    <td>340</td>
+    <td>4096~128K</td>
+    <td>每段文本截断长度</td>
+  </tr>
+  <tr>
+    <td>learning_rate</td>
+    <td>5e-4</td>
+    <td>1e-4~3e-4</td>
+    <td>初始学习率</td>
+  </tr>
+  <tr>
+    <td>lr 衰减</td>
+    <td>余弦 → 10% 终值</td>
+    <td>余弦 → 10% 终值</td>
+    <td>学习率随训练逐渐降低</td>
+  </tr>
+  <tr>
+    <td>grad_clip</td>
+    <td>1.0</td>
+    <td>0.5~1.0</td>
+    <td>梯度最大值上限</td>
+  </tr>
+  <tr>
+    <td>optimizer</td>
+    <td>AdamW</td>
+    <td>AdamW</td>
+    <td>行业标准</td>
+  </tr>
+  <tr>
+    <td>dtype</td>
+    <td>bfloat16</td>
+    <td>bfloat16</td>
+    <td>混合精度训练</td>
+  </tr>
+  <tr>
+    <td>epochs</td>
+    <td>2</td>
+    <td>1~3</td>
+    <td>过几遍数据</td>
+  </tr>
+  <tr>
+    <td>训练 token 总数</td>
+    <td>~2.1B</td>
+    <td>1T~15T</td>
+    <td>看了多少文本</td>
+  </tr>
+</table>
+
+<hr>
+
+<h2>余弦学习率衰减</h2>
+
+<pre><code>公式：lr = lr_max × (0.1 + 0.45 × (1 + cos(π × step / total_steps)))
+
+直观形状：
+lr
+↑
+│   ▁▁▁▁▁▁▁▁▁▁▁
+│  ▕              ▔▔▔▔▔▔▔▔▔▔▔▔
+│ ▕                          ▔▔▔
+│▕                               ▔▔▔
+└─────────────────────────────────────→ 训练步数
+
+初始 lr = 5e-4 × (0.1 + 0.45×2) = 5e-4 × 1.0 = 5e-4
+最终 lr = 5e-4 × (0.1 + 0.45×0) = 5e-4 × 0.1 = 5e-5</code></pre>
+
+<hr>
+
+<h2>训练 vs 推理的差异</h2>
+
+<table>
+  <tr><th>维度</th><th>训练</th><th>推理</th></tr>
+  <tr><td>输入方式</td><td>整段文本并行输入</td><td>逐 token 自回归</td></tr>
+  <tr><td>KV Cache</td><td>不用（每次都算整段）</td><td>用（缓存历史 K/V）</td></tr>
+  <tr><td>需要梯度</td><td>✅ 要（反向传播更新参数）</td><td>❌ 不要（torch.inference_mode）</td></tr>
+  <tr><td>Loss</td><td>❌ 需要计算</td><td>❌ 不需要</td></tr>
+  <tr><td>Dropout</td><td>✅ 启用</td><td>❌ 关闭</td></tr>
+  <tr><td>数据类型</td><td>bfloat16 + fp32 master weights</td><td>bfloat16/fp16/int8/4bit</td></tr>
+</table>
+
+<hr>
+
+<h2>一句话总结</h2>
+<div class="callout info">
+<strong>训练循环</strong> = 取 batch → 前向算 loss → 反向算梯度 → 攒够步数 → 裁剪梯度 → AdamW 更新参数 → 清梯度 → 重复。<br><br>
+每一个 step 更新一次参数，几万个 step 后模型逐渐学会"下一个词预测"。<br>
+全过程不需要人类标注——互联网上的文本就是天然标签。
+</div>
+
+<div class="nav-links">
+<p>📖 课程：<a href="../lessons/0005-pretrain-training-loop.html">0005 — Pretrain 训练循环详解</a></p>
+<p>📖 关联参考：<a href="../reference/image-video-tokenization.html">图片与视频 Token 化</a></p>
+</div>
+
+</div>
+</body>
+</html>
