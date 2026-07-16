@@ -20,9 +20,10 @@
 已完成：
 - ✅ 阶段0（前置基础）：训练流程、Tokenizer、Embedding、权重绑定、RoPE、NTK/YaRN
 - ✅ 阶段2（注意力机制）：Attention 代码逐行解读、多头注意力的分工与实现
+- ✅ 阶段3（GPT 模型架构）：Block 结构 ✓ | KV Cache ✓ | 图片/视频 Token 化 ✓ | 图文对齐/多模态训练 ✓ | Pretrain 训练循环 ✓
 
 进行中：
-- 🔄 阶段3（GPT 模型架构）：Block 结构 ✓ | KV Cache ✓ | 图片/视频 Token 化 ✓ | 图文对齐/多模态训练 ✓ | Pretrain 训练循环 ✓ | 阶段 3 完结 🏁
+- 🔄 阶段4（后训练）：SFT & LoRA ✓ | DPO/GRPO 待学
 
 ## 参考资料源
 

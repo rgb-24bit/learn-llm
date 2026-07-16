@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SFT 与 LoRA — 从"会预测"到"会回答"</title>
+<link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+<div class="container">
+
+<h1>🎯 SFT 与 LoRA</h1>
+<p class="meta">
+  <span class="tag tag-cyan">lesson 0006</span>
+  <span>阶段 4 — 后训练 · 微调</span>
+</p>
+
+<p>Pretrain 训练完的模型叫<strong>基座模型</strong>（base model）。它懂语言、有知识，但它有个问题——<strong>不会对话</strong>。</p>
+
+<p>你问它"什么是机器学习？"，它可能会继续写"机器学习是一个领域，深度学习是它的子集……"而不是用对话形式回答你。</p>
+
+<p>SFT 要解决的就是这个问题。</p>
+
+<hr>
+
+<h2>1. SFT 在干什么？</h2>
+
+<p>SFT（Supervised Fine-Tuning，监督微调）本质上就是——<strong>拿一堆"问题→正确答案"的配对数据，继续训练（微调）基座模型</strong>。</p>
+
+<p>训练循环和 Pretrain <strong>一模一样</strong>：取 batch → 前向 → 算 loss → 反向 → 更新参数。但有两个关键差异：</p>
+
+<h3>差异一：数据格式不一样</h3>
+
+<p>Pretrain 的数据是普通文本。SFT 的数据是<strong>多轮对话</strong>：</p>
+
+<pre><code>{
+  "conversations": [
+    {"role": "system", "content": "你是一个有帮助的助手。"},
+    {"role": "user",    "content": "什么是机器学习？"},
+    {"role": "assistant", "content": "机器学习是人工智能的一个分支，它让计算机从数据中学习模式……"}
+  ]
+}</code></pre>
+
+<p>这段对话通过 chat template 拼成一段文本，tokenize 后变成一串数字 ID。</p>
+
+<h3>差异二：Loss Masking——SFT 的精髓</h3>
+
+<p>还记得 Pretrain 吗？整段文本的所有 token 都参与 loss 计算。但 SFT 不行——</p>
+
+<p><strong>如果用户的问题也算 loss，模型会学会"预测用户会问什么"，这完全没意义。</strong></p>
+
+<p>所以 SFT 用了一个 <strong>loss mask</strong>：只有 assistant 回复部分的 token 参与 loss 计算，用户输入部分全部忽略（label 设为 -100，PyTorch 的 CrossEntropyLoss 遇到 -100 自动跳过）。</p>
+
+<pre><code>完整序列: [系统指令][用户问题][assistant回复]
+loss mask: [0][0][0][0][0][0][0][0][0][0][1][1][1][1][1][1]
+
+                              ↑                      ↑
+                     不参与 loss 计算         只在这儿算 loss</code></pre>
+
+<div class="callout tip">
+<strong>形象类比</strong>：Pretrain 像婴儿听人说话——所有声音都听，不管是谁说的。SFT 像学生只听老师讲的重点——只关注正确的回答方式。
+</div>
+
+<hr>
+
+<h2>2. Full SFT 的具体参数</h2>
+
+<p>minimind Full SFT 训练的关键参数：</p>
+
+<table>
+  <tr><th>参数</th><th>Pretrain</th><th>Full SFT</th><th>为什么差这么多？</th></tr>
+  <tr>
+    <td>学习率</td>
+    <td>5e-4</td>
+    <td><strong>1e-5</strong></td>
+    <td>SFT 是微调不是从零学。1e-5 是 5e-4 的 1/50。步子大了会把基座模型学到的知识"踩坏"</td>
+  </tr>
+  <tr>
+    <td>batch_size</td>
+    <td>32</td>
+    <td>16</td>
+    <td>SFT 数据量小，不需要大 batch。而且序列更长（768 vs 340），显存更紧张</td>
+  </tr>
+  <tr>
+    <td>max_seq_len</td>
+    <td>340</td>
+    <td>768</td>
+    <td>对话比普通文本长——系统指令 + 多轮对话需要更多 token</td>
+  </tr>
+</table>
+
+<p>整个训练过程：</p>
+<ul>
+  <li>数据量：几万条对话</li>
+  <li>通常 2-10 个 epoch（数据量小，多看几遍）</li>
+  <li>训练时间：几小时到一两天</li>
+  <li>效果变化：loss 从 ~1.0 降到 ~0.3</li>
+</ul>
+
+<hr>
+
+<h2>3. LoRA：轻量级微调</h2>
+
+<p>Full SFT 有个问题：<strong>模型越大，微调成本越高</strong>。一个 7B 模型全参数微调需要 8 张 A100。LoRA 就是来解决这个问题的。</p>
+
+<h3>3.1 核心想法</h3>
+
+<p>LoRA（Low-Rank Adaptation，低秩适配）的直觉：</p>
+
+<div class="card">
+<div class="card-title">一个假设：有效变化是低维的</div>
+<p>当你微调一个 768×768 的权重矩阵时，你真的需要调整全部 589,824 个数值吗？</p>
+<p>LoRA 的观点是：不需要。<strong>真正有用的调整方向只有少数几个。</strong></p>
+<p>就像调健身房里的杠铃片——你不需要改变所有杠铃片，加几个小片就行。</p>
+</div>
+
+<h3>3.2 具体做法</h3>
+
+<p>对每个目标线性层（比如 Attention 的 Q 矩阵）：</p>
+<ul>
+  <li><strong>原始权重 W</strong>（768×768）——冻结不动，不更新</li>
+  <li><strong>插入两个小矩阵</strong>：
+    <ul>
+      <li>A（768→16）——压缩维度</li>
+      <li>B（16→768）——恢复维度</li>
+    </ul>
+  </li>
+  <li><strong>输出</strong> = Wx + <strong>BAx</strong>（原始输出 + LoRA 的调整量）</li>
+</ul>
+
+<pre><code>正常线性层：y = Wx                         参数：589,824
+LoRA 线性层：y = Wx + B(Ax)                新增参数：2×768×16 = 24,576
+                                           占比：24,576 / 589,824 = 4.2%</code></pre>
+
+<h3>3.3 初始化细节</h3>
+<ul>
+  <li><strong>A 矩阵</strong>：高斯随机初始化（mean=0, std=0.02）</li>
+  <li><strong>B 矩阵</strong>：全零初始化</li>
+  <li><strong>结果</strong>：训练开始时 BA = 0，LoRA 输出为 0 → 模型输出和原始一模一样</li>
+  <li><strong>为什么重要</strong>：不破坏基座模型已有的能力。LoRA 从"零"开始慢慢学出需要调整的方向</li>
+</ul>
+
+<h3>3.4 挂在哪些层上</h3>
+
+<p>minimind 把 LoRA 挂在所有 <strong>方阵线性层</strong>（in_features == out_features）上——也就是 Attention 模块的 Q、K、V、O 四个投影矩阵。</p>
+
+<p>8 层 × 4 个 = 32 个 LoRA 模块</p>
+<p>32 × 24,576 = <strong>786,432 个参数</strong> ≈ 0.79M</p>
+<p>占 64M 总参数的 <strong>1.2%</strong></p>
+
+<p>FFN 的 W_gate/W_up/W_down 不是方阵（768→3072 或 3072→768），所以不挂 LoRA。</p>
+
+<hr>
+
+<h2>4. Full SFT vs LoRA：怎么选？</h2>
+
+<h3>算一笔账</h3>
+
+<table>
+  <tr><th></th><th>Full SFT</th><th>LoRA</th></tr>
+  <tr><td>训练 64M 模型</td><td>更新 64,000,000 个参数</td><td>更新 786,432 个参数</td></tr>
+  <tr><td>训练 7B 模型</td><td>更新 7,000,000,000 个参数</td><td>更新约 84,000,000 个参数（假设 rank=16）</td></tr>
+  <tr><td>保存的文件大小</td><td>~13GB</td><td>~168MB</td></tr>
+  <tr><td>8×A100 训练时间</td><td>~1 天</td><td>~2 小时</td></tr>
+</table>
+
+<h3>实际场景</h3>
+
+<p><strong>什么时候该用 Full SFT？</strong></p>
+<ul>
+  <li>你有很多高质量数据（5 万 + 条）</li>
+  <li>你要做一个通用对话助手</li>
+  <li>你有足够的 GPU 算力</li>
+</ul>
+
+<p><strong>什么时候该用 LoRA？</strong></p>
+<ul>
+  <li>你要做一个<strong>垂直领域</strong>的模型（医疗问答、法律咨询、代码助手）</li>
+  <li>你只有几千条数据</li>
+  <li>你想在同一个基座模型上<strong>切换多个技能</strong>——换 LoRA 权重就行</li>
+  <li>你要给每个用户<strong>个性化</strong>——每人套自己的 LoRA</li>
+  <li>你只有一张消费级显卡</li>
+</ul>
+
+<div class="callout info">
+<strong>典型生产流程</strong>：<br>
+① Pretrain（全参数，算力需求最大，通常不做）<br>
+② Full SFT（全参数调成通用对话模型）<br>
+③ LoRA（领域适配，每个垂直场景一套 LoRA）<br><br>
+市面上很多"医疗大模型"实际上就是在通用模型上加了一套医疗 LoRA。
+</div>
+
+<hr>
+
+<h2>5. 现实世界的数据量级</h2>
+
+<table>
+  <tr><th>模型</th><th>SFT 数据量</th><th>说明</th></tr>
+  <tr><td>LLaMA 3.1 (Meta)</td><td>数百万条</td><td>多语言、多领域、人工标注</td></tr>
+  <tr><td>Qwen2.5 (Alibaba)</td><td>数百万条</td><td>涵盖通用、代码、数学、推理</td></tr>
+  <tr><td>minimind (教学用)</td><td>几万条</td><td>GPT-4 生成的对话数据</td></tr>
+  <tr><td>一般个人项目</td><td>几百~几千条</td><td>LoRA 足够，不需要 Full SFT</td></tr>
+</table>
+
+<hr>
+
+<h2>6. 想一下</h2>
+
+<div class="card">
+<div class="card-title">🤔 思考一：为什么 LoRA 用较小的学习率（1e-4）比 Full SFT（1e-5）反而大？</div>
+<p>LoRA 的参数是从头初始化的（从 0 开始），而 Full SFT 的参数已经经过了 pretrain，已经处在一个很好的位置。<br>
+LoRA 需要稍大的学习率让这些新参数快速进入有效的方向。但相比随机初始化一个完整网络（5e-4），1e-4 还是小得多。</p>
+</div>
+
+<div class="card">
+<div class="card-title">🤔 思考二：LoRA 的秩 r 怎么选？</div>
+<p>r=8 对简单任务（风格转换）足够。r=16 是通用选择。r=32-64 用于复杂任务（代码、推理）。<br>
+r 越大，表达能力越强，但参数量线性和增加。实际中 r=16 在 80% 的场景下够用。</p>
+</div>
+
+<hr>
+
+<h2>📚 推荐阅读</h2>
+<ul>
+  <li><strong>LoRA 论文</strong>：<a href="https://arxiv.org/abs/2106.09685">LoRA: Low-Rank Adaptation of Large Language Models</a> — 原文只有 9 页，简洁清晰</li>
+  <li><strong>minimind 实现</strong>：`model/model_lora.py` — 仅 65 行，最精简的教学级实现</li>
+  <li><strong>minimind Full SFT</strong>：`trainer/train_full_sft.py` — 和 pretrain 几乎一样的训练循环</li>
+</ul>
+
+<p>有任何不清楚的，随时问我！</p>
+
+<div class="nav-links">
+<p>📖 参考：<a href="../reference/sft-and-lora.html">SFT 与 LoRA 速查</a></p>
+<p>📖 前置课程：<a href="../lessons/0005-pretrain-training-loop.html">0005 — Pretrain 训练循环</a></p>
+</div>
+
+</div>
+</body>
+</html>
