@@ -29,8 +29,8 @@
 - ✅ RMSNorm：除 RMS 归一化，不减均值
 - ✅ FFN/SwiGLU：门控前馈网络，W_gate/W_up/W_down 三权重
 - ✅ **KV Cache**：推理时不重算历史 K/V，用内存换速度
-- ✅ **MoE vs Dense**：差异仅在 FFN 层，Router + 多专家 + Load Balancing Loss
-- ✅ **minimind MoE 实现**：4 专家 Top-1，28 行核心逻辑
+- ✅ **图片/视频 Token 化**：ViT patch embedding，三种多模态连接方式
+- ✅ **多模态训练机制**：CLIP 对比学习、对齐→SFT 三阶段、模型三件套架构
 - ✅ **Scaling Law**：PPL ∝ N^(-0.076)，Chinchilla 1:20 法则，边际递减
 
 ### 待学（按优先级）

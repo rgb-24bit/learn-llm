@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>多模态模型结构速查 — 参考</title>
+<link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+<div class="container">
+
+<h1>🧠 多模态模型结构速查</h1>
+<p class="meta">
+  <span class="tag tag-blue">reference</span>
+  <span>多模态 · 模型架构</span>
+</p>
+
+<hr>
+
+<h2>标准三件套</h2>
+
+<pre><code>┌──────────────┐    ┌──────────────┐    ┌──────────────┐
+│  视觉编码器   │───→│   连接器      │───→│  LLM 主干     │
+│  (ViT/CLIP)  │    │ (Projector)  │    │ (LLaMA/Qwen) │
+└──────────────┘    └──────────────┘    └──────────────┘
+    图片→token        对齐语义空间       文本+视觉→回答</code></pre>
+
+<table>
+  <tr><th>组件</th><th>做什么</th><th>典型实现</th><th>参数量</th></tr>
+  <tr>
+    <td>视觉编码器</td>
+    <td>图片→视觉 token 序列</td>
+    <td>ViT-L (patch=14), SigLIP</td>
+    <td>~300M</td>
+  </tr>
+  <tr>
+    <td>连接器</td>
+    <td>视觉 token → LLM embedding 空间</td>
+    <td>2 层 MLP, Q-Former, Cross-Attn</td>
+    <td>~20M</td>
+  </tr>
+  <tr>
+    <td>LLM 主干</td>
+    <td>统一处理多模态序列</td>
+    <td>LLaMA, Qwen, DeepSeek</td>
+    <td>7B~72B</td>
+  </tr>
+</table>
+
+<hr>
+
+<h2>CLIP 对比学习机制</h2>
+
+<pre><code>训练数据：N 对图文对（图片₁, 文本₁）、（图片₂, 文本₂）…（图片ₙ, 文本ₙ）
+
+目标：让配对项在 embedding 空间靠近，非配对项远离
+
+   图片₁──→[图片编码器]──→ v₁ ──┐
+   图片₂──→[图片编码器]──→ v₂ ──┤         相似度矩阵 (N×N)
+   图片₃──→[图片编码器]──→ v₃ ──┤    ┌─────────────────────┐
+   ...                         ├───→│ ✓ 高  ✗ 低  ✗ 低  ✗ │
+   图片ₙ──→[图片编码器]──→ vₙ ──┤    │ ✗  ✓ 高  ✗ 低  ✗  │
+                                 │    │ ✗  ✗  ✓ 高  ✗  │
+   文本₁──→[文本编码器]──→ t₁ ──┤    │ ✗  ✗  ✗  ✓ 高  │
+   文本₂──→[文本编码器]──→ t₂ ──┤    └─────────────────────┘
+   文本₃──→[文本编码器]──→ t₃ ──┤        对角线 = 配对
+   ...                         │         非对角线 = 不配对
+   文本ₙ──→[文本编码器]──→ tₙ ──┘</code></pre>
+
+<div class="card">
+<div class="card-title">InfoNCE Loss 伪直觉</div>
+<p>对每个图片向量 vᵢ：在所有文本向量 t₁~tₙ 中，<strong>找出哪个才是它配对的 tᵢ</strong>。<br>
+模型要做的事：v₁ 和 t₁ 的相似度，要比 v₁ 和 t₂、t₃…tₙ 的相似度都高。<br>
+最终变成一个 N 选 1 的分类问题——比对的越准，loss 越低。</p>
+</div>
+
+<hr>
+
+<h2>多模态 LLM 训练流水线</h2>
+
+<table>
+  <tr><th>阶段</th><th>训练数据</th><th>训练哪些参数</th><th>目的</th></tr>
+  <tr>
+    <td><strong>0. CLIP 预训练</strong></td>
+    <td>4 亿图文对</td>
+    <td>视觉编码器 + 文本编码器</td>
+    <td>建立图文对齐的 embedding 空间</td>
+  </tr>
+  <tr>
+    <td><strong>1. 连接器对齐</strong></td>
+    <td>图文对（同 CLIP 数据）</td>
+    <td>🟢 连接器<br>🔴 冻结 ViT + 冻结 LLM</td>
+    <td>让视觉 token 能"翻译"进 LLM 的空间</td>
+  </tr>
+  <tr>
+    <td><strong>2. 多模态 SFT</strong></td>
+    <td>图片问答数据</td>
+    <td>🟢 连接器 + LLM（LoRA）<br>🔴 冻结 ViT</td>
+    <td>教会 LLM 看懂图，回答问题</td>
+  </tr>
+  <tr>
+    <td><strong>3. 多模态对齐</strong></td>
+    <td>图片偏好数据</td>
+    <td>🟢 LLM（LoRA 或全量）</td>
+    <td>提高回答质量（可选阶段）</td>
+  </tr>
+</table>
+
+<hr>
+
+<h2>关键参数对比</h2>
+
+<table>
+  <tr><th>模型</th><th>视觉编码器</th><th>连接方式</th><th>训练阶段</th><th>备注</th></tr>
+  <tr>
+    <td>LLaVA</td>
+    <td>CLIP ViT-L</td>
+    <td>MLP 投影</td>
+    <td>对齐 + SFT</td>
+    <td>最简单的基线</td>
+  </tr>
+  <tr>
+    <td>LLaMA 3.2 Vision</td>
+    <td>ViT-H (patch=14)</td>
+    <td>交叉注意力</td>
+    <td>对齐 + SFT</td>
+    <td>架构改动最大</td>
+  </tr>
+  <tr>
+    <td>Qwen2-VL</td>
+    <td>动态 ViT</td>
+    <td>MLP 投影 + M-ROPE</td>
+    <td>对齐 + SFT + DPO</td>
+    <td>工业级方案</td>
+  </tr>
+  <tr>
+    <td>DeepSeek-VL2</td>
+    <td>SigLIP + SAM</td>
+    <td>投影 + MoE 路由</td>
+    <td>对齐 + SFT</td>
+    <td>MoE 架构</td>
+  </tr>
+</table>
+
+<hr>
+
+<h2>一句话总结</h2>
+<div class="callout info">
+<strong>图文如何关联？</strong> — CLIP 对比学习：拉近配对图文，推远非配对图文。<br>
+<strong>多模态模型怎么训练？</strong> — 三步走：CLIP 预训练 → 对齐连接器 → 多模态 SFT。<br>
+<strong>整体是什么结构？</strong> — 视觉编码器 + 连接器 + LLM 主干的三明治架构。
+</div>
+
+<div class="nav-links">
+<p>📖 课程：<a href="../lessons/0004-multimodal-training.html">0004 — 图文对齐与多模态训练</a></p>
+<p>📖 前置参考：<a href="image-video-tokenization.html">图片与视频 Token 化速查</a></p>
+</div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>图文对齐与多模态训练 — 从 token 到理解</title>
+<link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+<div class="container">
+
+<h1>🧠 图片训练与图文对齐</h1>
+<p class="meta">
+  <span class="tag tag-cyan">lesson 0004</span>
+  <span>阶段 3 — 多模态 · 训练机制</span>
+</p>
+
+<p>上一课你知道了图片怎么变成 token。但 token 只是材料——模型<strong>怎么"学会"看图</strong>？图和文字<strong>怎么关联</strong>？多模态模型<strong>整体长什么样</strong>？</p>
+<p>这一课全部回答。</p>
+
+<hr>
+
+<h2>1. 核心问题：图片和文字是两套语言</h2>
+
+<p>如果你只把视觉 token 扔进 LLM，模型会看到一堆数字——但它不知道这些数字<strong>对应什么语义</strong>。</p>
+
+<p>就像你给一个只懂英语的人一本中文书：他看得见符号，但看不懂意思。</p>
+
+<p>要让模型"看懂"图片，必须先把图片和文字的语义<strong>对齐到同一个空间</strong>。而完成这个对齐的核心技术叫 <strong>CLIP</strong>。</p>
+
+<hr>
+
+<h2>2. CLIP：图文对齐的"翻译官"</h2>
+
+<h3>2.1 训练数据</h3>
+
+<p>CLIP 的训练数据很简单粗暴：<strong>4 亿张图片，每张配一句文字描述</strong>（从网上爬的）。</p>
+
+<p>比如：</p>
+<ul>
+  <li>一张猫的照片 → "A cat sitting on a chair"</li>
+  <li>一张汽车的照片 → "A red car parked on the street"</li>
+  <li>一张蛋糕的照片 → "A birthday cake with candles"</li>
+</ul>
+
+<h3>2.2 训练方法：对比学习</h3>
+
+<p>CLIP 同时训练两个编码器：</p>
+<ul>
+  <li><strong>图片编码器</strong>（ViT）— 把图片变成向量</li>
+  <li><strong>文本编码器</strong>（Transformer）— 把文字变成向量</li>
+</ul>
+
+<p><strong>拿具体数字走一遍训练过程</strong>：</p>
+
+<div class="card">
+<div class="card-title">🔢 假设 batch size = 4</div>
+<p>你有 4 张图片和对应的 4 句描述：</p>
+<ul>
+  <li>猫图 ↔ "一只猫"</li>
+  <li>狗图 ↔ "一只狗"</li>
+  <li>车图 ↔ "一辆车"</li>
+  <li>蛋糕图 ↔ "一个蛋糕"</li>
+</ul>
+
+<p><strong>第一步</strong>：图片编码器把 4 张图变成 4 个向量 v₁ v₂ v₃ v₄</p>
+<p><strong>第二步</strong>：文本编码器把 4 句话变成 4 个向量 t₁ t₂ t₃ t₄</p>
+<p><strong>第三步</strong>：算相似度矩阵（4×4）</p>
+
+<pre><code>         t₁(猫)  t₂(狗)  t₃(车)  t₄(蛋糕)
+v₁(猫图)   0.95    0.20    0.15    0.18    ← 猫图跟"猫"最像 ✓
+v₂(狗图)   0.22    0.92    0.13    0.16    ← 狗图跟"狗"最像 ✓
+v₃(车图)   0.10    0.12    0.93    0.08    ← 车图跟"车"最像 ✓
+v₄(蛋糕图) 0.15    0.14    0.11    0.94    ← 蛋糕图跟"蛋糕"最像 ✓</code></pre>
+
+<p><strong>第四步</strong>：计算 loss</p>
+<p>模型要做的：对图片 v₁，"找"出正确的文本 t₁，且 v₁·t₁ 的相似度 > v₁·t₂、v₁·t₃、v₁·t₄。</p>
+<p>这本质上是一个 <strong>4 选 1 的分类任务</strong>。模型把 v₁ 在 4 个文本中选出正确的那一个，就算做对。</p>
+<p>如果 v₁ 选了 t₂（狗）并给出高分——loss 就大，模型被惩罚。</p>
+</div>
+
+<h3>2.3 InfoNCE Loss（对比损失）</h3>
+
+<p>名字唬人，本质就是一个 <strong>softmax 分类</strong>：</p>
+
+<p>对图片 vᵢ：在 N 个文本中，让正确配对 tᵢ 的相似度得分经过 softmax 之后接近 1，其他接近 0。</p>
+
+<p>如果你用 CrossEntropyLoss 做过分类任务，这里一样的——只不过"类别"是 N 个文本。</p>
+
+<div class="callout tip">
+<strong>训练结束后，CLIP 得到了什么？</strong><br>
+两个编码器学会了同一个 embedding 空间——"猫"的文字向量和猫的图片向量之间的距离很近，"猫"和"汽车"的图片向量距离很远。<br><br>
+这个<strong>共享语义空间</strong>，就是后续多模态 LLM 的基石。
+</div>
+
+<hr>
+
+<h2>3. 多模态 LLM 的整体结构</h2>
+
+<p>有了 CLIP 对齐好的视觉编码器，多模态 LLM 就是"三件套"拼在一起：</p>
+
+<pre><code>你上传一张猫的照片
+    │
+    ▼
+┌─────────────────────────────────────────────┐
+│  ① 视觉编码器（CLIP 训练好的 ViT）           │
+│  图片 → 196 个视觉 token                    │
+│  （记住上节课：切 patches → 线性投影）        │
+└────────────────────┬────────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────────┐
+│  ② 连接器（新训练的 MLP 投影层）            │
+│  视觉 token → 投影到 LLM 的 embedding 空间   │
+│  （这是唯一新增的参数，约 2000 万）           │
+└────────────────────┬────────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────────┐
+│  ③ LLM 主干                                  │
+│  接收拼接序列：                               │
+│  [img₁][img₂]...[img₁₉₆][系统指令][用户问题]  │
+│  当成一个长序列，逐 token 生成回答             │
+└─────────────────────────────────────────────┘
+    │
+    ▼
+"这是一只橘猫，坐在椅子上晒太阳。"
+</code></pre>
+
+<hr>
+
+<h2>4. 多模态模型的训练过程（三步走）</h2>
+
+<p>你已经知道纯文本 LLM 是 Pretrain → SFT → DPO。多模态 LLM 类似，但要再加一步专门对齐视觉和语言：</p>
+
+<h3>第 0 步：CLIP 预训练（图文对齐的基础）</h3>
+
+<table>
+  <tr><th>项目</th><th>值</th></tr>
+  <tr><td>数据</td><td>4 亿图文对（网上爬的）</td></tr>
+  <tr><td>训练谁</td><td>视觉编码器 + 文本编码器（两套独立的网络）</td></tr>
+  <tr><td>怎么算 loss</td><td>对比学习（上面讲过的 InfoNCE）</td></tr>
+  <tr><td>在哪做</td><td>OpenAI 等研究机构做完，开源出来供大家用</td></tr>
+  <tr><td>结果</td><td>一个能"看懂"图片语义的视觉编码器</td></tr>
+</table>
+
+<div class="callout info">
+<strong>关键理解</strong>：大多数做多模态 LLM 的团队 <strong>不自己训练 CLIP</strong>。就像你训练 LLaMA 不需要自己发明 Transformer——直接用现成的 CLIP ViT 模型（OpenAI 开源的）。
+</div>
+
+<h3>第 1 步：对齐连接器（只训投影层）</h3>
+
+<table>
+  <tr><th>项目</th><th>值</th></tr>
+  <tr><td>数据</td><td>图文对（和 CLIP 类似的数据）</td></tr>
+  <tr><td>训练谁</td><td><strong>只训连接器</strong>，冻结 ViT + 冻结 LLM</td></tr>
+  <tr><td>训练目标</td><td>LLM 看到视觉 token 后，能预测出正确的文字描述</td></tr>
+  <tr><td>训练数据量</td><td>约 60 万图文对</td></tr>
+  <tr><td>为什么只训连接器？</td><td>ViT 已经是"看懂图"的、LLM 已经是"能说会道"的。唯一的缺口是连接器——它要学会把 ViT 的输出"翻译"给 LLM</td></tr>
+</table>
+
+<h3>第 2 步：多模态 SFT（教会模型看图回答问题）</h3>
+
+<table>
+  <tr><th>项目</th><th>值</th></tr>
+  <tr><td>数据</td><td>图片 + 问题 + 答案（人工标注的问答对）</td></tr>
+  <tr><td>训练谁</td><td>连接器 + LLM（LoRA），仍冻结 ViT</td></tr>
+  <tr><td>典型数据</td><td>"这张图里有什么？" → "有一只橘猫" / "这张图的构图如何？" → "三分法构图……"</td></tr>
+  <tr><td>数据量</td><td>LLaVA 用了约 15 万条</td></tr>
+</table>
+
+<div class="callout tip">
+<strong>关键洞察</strong>：LLaVA 的 15 万条多模态 SFT 数据不是人工从头写的——而是用 GPT-4V（已有的最强多模态模型）<strong>看图生成问答对</strong>。先用最强模型造数据，再用这些数据训练更小的模型。这叫 <strong>self-instruct</strong> 的多模态版本。
+</div>
+
+<hr>
+
+<h2>5. 具体例子：模型怎么"看懂"一张图</h2>
+
+<p>走一遍完整的前向推理：</p>
+
+<div class="card">
+<div class="card-title">场景：你上传了一张猫的照片，问"这是什么？"</div>
+
+<ol>
+  <li><strong>图片进入 ViT</strong>：224×224 照片 → 切 196 个 patches → 线性投影 → 196 个视觉 token（每个 768 维）</li>
+  <li><strong>视觉 token 过连接器</strong>：MLP 投影层把 768 维映射到 LLM 的 4096 维空间</li>
+  <li><strong>拼成完整序列</strong>：[视觉 token × 196] [系统指令] [用户问题："这是什么？"]</li>
+  <li><strong>LLM 处理</strong>：Self-Attention 让每个视觉 token 能看到其他视觉 token，也能看到文本 token——模型在"读图的同时看问题"</li>
+  <li><strong>生成回答</strong>：逐 token 生成 "这" → "是" → "一" → "只" → "猫"</li>
+</ol>
+
+<div class="sidenote">Attention 机制在此时发挥作用：生成"猫"这个 token 时，模型会重点关注图片中猫所在区域对应的几个 patch token。</div>
+</div>
+
+<hr>
+
+<h2>6. 纯文本 LLM 训练 vs 多模态训练对比</h2>
+
+<table>
+  <tr><th></th><th>纯文本 LLM</th><th>多模态 LLM（额外部分）</th></tr>
+  <tr>
+    <td>预训练</td>
+    <td>TB 级文本，"下一个词预测"</td>
+    <td>CLIP：4 亿图文对，对比学习</td>
+  </tr>
+  <tr>
+    <td>对齐层</td>
+    <td>无（文本本来就在词表里）</td>
+    <td>连接器对齐：60 万图文对，只训投影层</td></tr>
+  <tr>
+    <td>SFT</td>
+    <td>纯文本对话数据</td>
+    <td>图片问答数据（15 万条）</td>
+  </tr>
+  <tr>
+    <td>DPO/RLHF</td>
+    <td>文本偏好数据</td>
+    <td>图片偏好数据（可选）</td>
+  </tr>
+  <tr>
+    <td>总训练成本</td>
+    <td>极高的百万元级</td>
+    <td>在一个已经训练好的 LLM 上加，可能几千元（LlAVA）</td>
+  </tr>
+</table>
+
+<hr>
+
+<h2>7. 想一下</h2>
+
+<div class="card">
+<div class="card-title">🤔 思考一：CLIP 和 GPT 的预训练有什么本质区别？</div>
+<p>GPT 预训练的任务是"下一个词预测"——在文本内部学习。</p>
+<p>CLIP 的任务是"这张图和这句话是不是一对"——在两种模态<strong>之间</strong>学习。</p>
+<p>一个学语言本身，一个学图文关联。它们是互补的。</p>
+</div>
+
+<div class="card">
+<div class="card-title">🤔 思考二：为什么连接器对齐阶段要冻结 LLM？</div>
+<p>因为 LLM 已经学会了完美的语言能力。如果一起训，连接器可能会"带偏"LLM——比如视觉 token 噪声太大，LLM 为了迁就噪声而降低自己的语言能力。</p>
+<p>先固定 LLM，强迫连接器去适应 LLM；连接器稳定了，再放开一起训。</p>
+</div>
+
+<hr>
+
+<h2>📚 推荐阅读</h2>
+<ul>
+  <li><strong>CLIP 论文</strong>：<a href="https://arxiv.org/abs/2103.00020">Learning Transferable Visual Models From Natural Language Supervision</a> — 图文对齐的基石</li>
+  <li><strong>LLaVA 论文</strong>：<a href="https://arxiv.org/abs/2304.08485">Visual Instruction Tuning</a> — 多模态 SFT 的经典方案</li>
+  <li><strong>Qwen2-VL 论文</strong>：<a href="https://arxiv.org/abs/2409.12191">Qwen2-VL: Enhancing Vision-Language Model's Perception of the World at Any Resolution</a> — 工业级多模态最佳实践</li>
+</ul>
+
+<p>有任何不清楚的地方，随时问我！</p>
+
+<div class="nav-links">
+<p>📖 参考：<a href="../reference/multimodal-model-architecture.html">多模态模型结构速查</a></p>
+<p>📖 前置课程：<a href="../lessons/0003-image-video-tokenization.html">0003 — 图片与视频 Token 化</a></p>
+<p>📖 关联课程：<a href="https://rgb-24bit.github.io/learn-llm/lessons/0001-kv-cache.html">KV Cache</a></p>
+</div>
+
+</div>
+</body>
+</html>
