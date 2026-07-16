@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>图片与视频 Token 化 — LLM 如何看懂图像</title>
+<link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+<div class="container">
+
+<h1>📸 图片与视频 Token 化</h1>
+<p class="meta">
+  <span class="tag tag-cyan">lesson 0003</span>
+  <span>阶段 3 — 多模态入门 · 视觉编码</span>
+</p>
+
+<p>你之前学过了文本 Tokenizer（BPE 把文字切成 token），知道了 LLM 只能吃 token 序列。
+那问题来了——<strong>图片呢？视频呢？</strong></p>
+
+<p>毕竟 GPT-4o、通义千问都能看图，它们是怎么把一张照片或者一段视频"翻译"成 LLM 能理解的 token 的呢？</p>
+
+<hr>
+
+<h2>1. 核心问题：图片不是文字</h2>
+
+<p>回忆一下文本 Tokenizer 的工作方式：</p>
+
+<pre><code>"Hello world"  →  BPE 分词  →  ["Hello", " world"]  →  查词表拿 token ID  [15496, 1495]</code></pre>
+
+<p>文字天然是<strong>离散的</strong>——字母和词之间边界清楚。但图片呢？</p>
+
+<p>一张 224×224 的彩色图片，本质上是一个 <strong>224×224×3 的浮点数矩阵</strong>（长×宽×RGB 三通道）。
+是连续的，没有边界，没法直接查词表。</p>
+
+<div class="callout info">
+<strong>一句话总结问题</strong>：LLM 吃离散 token，图片是连续像素。要搭一座桥。
+</div>
+
+<hr>
+
+<h2>2. 解决办法：切格子（Patch Embedding）</h2>
+
+<p>2017 年 ViT（Vision Transformer）论文的标题就叫 <em>An Image is Worth 16×16 Words</em>——「一张图片值 16×16 个词」。</p>
+
+<p>名字已经告诉你答案了：把图片<strong>切成一个个小方块</strong>，每个小方块就是一个"视觉单词"。</p>
+
+<h3>具体步骤（算例）</h3>
+
+<p>假设你拿到一张 224×224 的彩色照片：</p>
+
+<pre><code>步骤 1：选格子大小   →  16×16 像素（ViT 标准配置）
+步骤 2：切分          →  224 ÷ 16 = 14
+                         横向 14 个格子，纵向 14 个格子
+                         总共 14×14 = 196 个格子
+步骤 3：展平          →  每个格子 16×16×3 = 768 个数字（浮点数）
+步骤 4：线性投影      →  768 个数字 × 一个大矩阵（W）→ 输出一个 768 维向量
+                         这个向量就是「视觉 token」
+步骤 5：加上位置编码  →  告诉模型每个格子原来在哪位置（左上角、右下角…）
+步骤 6：送进 Transformer → 196 个视觉 token 像 196 个"词"一样被处理</code></pre>
+
+<p>每一步发生了什么，拿数据走一遍：</p>
+
+<table>
+  <tr><th>步骤</th><th>输入形状</th><th>做了什么</th><th>输出形状</th></tr>
+  <tr>
+    <td>原图</td>
+    <td>224×224×3</td>
+    <td>—</td>
+    <td>224×224×3</td>
+  </tr>
+  <tr>
+    <td>切 patches</td>
+    <td>224×224×3</td>
+    <td>切成 14×14 个 16×16×3 小方块</td>
+    <td>196 × (768)</td>
+  </tr>
+  <tr>
+    <td>展平</td>
+    <td>196 个 16×16×3</td>
+    <td>每个方块拉直成 768 个数字</td>
+    <td>196 × 768</td>
+  </tr>
+  <tr>
+    <td>线性投影</td>
+    <td>196 × 768</td>
+    <td>乘权重矩阵 W: 768×768</td>
+    <td>196 × 768</td>
+  </tr>
+  <tr>
+    <td>+ 位置编码</td>
+    <td>196 × 768</td>
+    <td>加 RoPE 或可学习的位置向量</td>
+    <td>196 × 768</td>
+  </tr>
+</table>
+
+<div class="callout tip">
+<strong>直觉类比</strong>：就像把一幅马赛克画数清楚——每个马赛克小方块是一个 "word"，马赛克排成 14×14 的格子，这些格子按顺序就是 LLM 能读的句子了。
+</div>
+
+<h3>一张图顶多少字？</h3>
+<p>一张 224×224 的图 ≈ <strong>196 个视觉 token</strong>。而 196 个英文 token 大概能写一段 150 字的英文短文。
+<strong>一张图和一段话，在模型眼里"长度差不多"。</strong></p>
+
+<hr>
+
+<h2>3. 从图片到多模态 LLM</h2>
+
+<p>现在你有了视觉 token（196 个 768 维的向量）。可 LLM 的文本 token 也是向量啊——它们怎么<strong>共存</strong>？</p>
+
+<p>两个问题需要解决：</p>
+
+<ol>
+  <li><strong>维度对齐</strong>：视觉 token 是 768 维，LLM 的 embedding 可能也是 768 维——好巧！但如果不是呢？（比如 LLM 用 4096 维）</li>
+  <li><strong>语义对齐</strong>：视觉 token 编码的是"颜色/边缘/纹理"这种底层信息，不是"猫/狗/车"这种语义。</li>
+</ol>
+
+<p>主流解决方案有三种，我按复杂程度排序：</p>
+
+<h3>方案 A：MLP 投影层（LLaVA，2023）</h3>
+
+<p><strong>最简单、最流行</strong>。在视觉编码器和 LLM 之间加一个 <strong>两层 MLP</strong>（一个简单的神经网络）：</p>
+
+<pre><code>视觉 token (196 × 768)
+    ↓
+MLP 投影层： 768 → 4096 → 4096
+    ↓
+对齐后的视觉 token (196 × 4096)
+    ↓ 拼在文本 token 前面：
+[img₁][img₂]...[img₁₉₆][系统指令][用户问题][模型回答]</code></pre>
+
+<p>关键：这个 MLP 就是整个多模态系统中<strong>唯一新增的可训练参数</strong>。视觉编码器和 LLM 都冻结不动，只训练这个小 MLP，让视觉 token 学会"翻译"成 LLM 能懂的语言。</p>
+
+<div class="callout info">
+<strong>算一笔账</strong>：LLaVA 用的投影层是 768→4096→4096，两层线性层。<br>
+参数 = 768×4096 + 4096×4096 ≈ 20M 参数。<br>
+相比一个 7B LLM（70亿参数）——这个投影层只有 LLM 的 <strong>0.03%</strong>。<br>
+所以 LLaVA 训练极其快，而且效果出奇好。
+</div>
+
+<h3>方案 B：交叉注意力（Flamingo / LLaMA 3.2 Vision）</h3>
+
+<p>LLM 每一层在计算完 self-attention 之后，额外加一个 <strong>cross-attention 层</strong>：</p>
+
+<pre><code>文本 token 处理流程（每层）：
+[self-attention]  →  [cross-attention（读视觉 token）]  →  [FFN]
+
+视觉 token 队列： [v₁][v₂][v₃]...[v₁₉₆] ← cross-attention 从这里读取</code></pre>
+
+<p>好处：视觉 token 不混入文本序列，每层独立决定"我这次想看哪些视觉信息"。</p>
+
+<h3>方案 C：Q-Former 压缩（BLIP-2）</h3>
+
+<p>引入<strong>可学习的查询向量</strong>（learned queries），通过 cross-attention 从视觉 token 中"提纯"出最相关的信息：</p>
+
+<pre><code>视觉 token × 256 ──────────────┐
+                                ├→ cross-attention → 压缩后的 token × 32
+可学习查询 × 32 ────────────────┘                                      ↓
+                                                               送进 LLM</pre>
+
+<p>256 个视觉 token → 32 个"精华 token"。</p>
+
+<hr>
+
+<h2>4. 视频怎么办？Token 爆炸问题</h2>
+
+<p>如果一张 224×224 的图是 196 个 token，一段视频呢？</p>
+
+<table>
+  <tr><th>视频时长</th><th>帧率</th><th>总帧数</th><th>总 token</th><th>类比</th></tr>
+  <tr><td>10 秒</td><td>1 fps</td><td>10</td><td>~2,000</td><td>3 页书</td></tr>
+  <tr><td>10 秒</td><td>30 fps</td><td>300</td><td>~58,800</td><td>一本小册子</td></tr>
+  <tr><td>1 分钟</td><td>30 fps</td><td>1,800</td><td>~352,800</td><td>一本书</td></tr>
+  <tr><td>10 分钟</td><td>30 fps</td><td>18,000</td><td>~3,528,000</td><td>一整个书架</td></tr>
+</table>
+
+<p><strong>问题是显而易见的</strong>。目前主流模型上下文窗口是 128K~1M token，一部 10 分钟视频就干爆了。</p>
+
+<p>解决方案：</p>
+
+<ol>
+  <li><strong>帧采样</strong>：每秒只取 1-2 帧，丢掉中间帧。</li>
+  <li><strong>帧压缩</strong>：每帧通过 Q-Former 从 196 个 token 压缩到 16-32 个。</li>
+  <li><strong>时空编码器</strong>：用 3D 卷积一次编码多帧，直接输出更少的 token。</li>
+  <li><strong>流式处理</strong>：不一次性加载全部视频，而是随看随丢旧帧（类似 KV Cache 的管理策略）。</li>
+</ol>
+
+<div class="callout warn">
+<strong>现实情况</strong>：目前大多数"视频理解"模型其实主要看视频的文字描述和关键帧。真正的帧级视频理解还在研究中——计算量太大了。
+</div>
+
+<hr>
+
+<h2>5. 实操案例：不同模型的差异</h2>
+
+<table>
+  <tr><th>模型</th><th>视觉编码器</th><th>图片 token 数</th><th>连接方式</th></tr>
+  <tr>
+    <td>GPT-4o</td>
+    <td>自有视觉编码器（未公开）</td>
+    <td>可变（分辨率自适应）</td>
+    <td>未公开</td>
+  </tr>
+  <tr>
+    <td>LLaMA 3.2 Vision (11B)</td>
+    <td>ViT (patch=14)</td>
+    <td>~256（预处理后）</td>
+    <td>交叉注意力</td>
+  </tr>
+  <tr>
+    <td>LLaVA (7B)</td>
+    <td>CLIP ViT-L (patch=14)</td>
+    <td>256</td>
+    <td>MLP 投影</td>
+  </tr>
+  <tr>
+    <td>Qwen2-VL (72B)</td>
+    <td>ViT + 动态分辨率</td>
+    <td>160~2560（自适应）</td>
+    <td>MLP 投影 + M-ROPE</td>
+  </tr>
+  <tr>
+    <td>DeepSeek-VL2</td>
+    <td>SigLIP ViT</td>
+    <td>~576（多尺度）</td>
+    <td>投影 + MoE 路由</td>
+  </tr>
+</table>
+
+<hr>
+
+<h2>6. 想一下</h2>
+
+<div class="card">
+<div class="card-title">🤔 思考一：为什么 LLaVA 的 MLP 投影层能工作？</div>
+<p>直觉上，"把视觉 token 过两层线性层"听起来太简单了。为什么它有效？</p>
+<p><strong>提示</strong>：CLIP 在预训练时已经把图片和文本对齐到了同一个 embedding 空间。视觉 token 和文本 token 在预训练后就已经在"同一个语言体系"里了，MLP 只是做最后的校准。</p>
+</div>
+
+<div class="card">
+<div class="card-title">🤔 思考二：图片 token 数远多于文本 token 数有什么影响？</div>
+<p>一张 224×224 的图 ≈ 200 个 token，也就是约 150 个英文单词。如果你上传一张图然后问"这张图里有什么？"——</p>
+<p>视觉 token 占序列的 95%+。这意味着 Attention 矩阵的大部分计算都花在"看图片"上，而不是"理解问题+生成回答"上。</p>
+</div>
+
+<hr>
+
+<h2>📚 推荐阅读</h2>
+<ul>
+  <li><strong>ViT 论文</strong>：<a href="https://arxiv.org/abs/2010.11929">An Image is Worth 16×16 Words</a> — 图片 token 化的开山之作</li>
+  <li><strong>CLIP 论文</strong>：<a href="https://arxiv.org/abs/2103.00020">Learning Transferable Visual Models From Natural Language Supervision</a> — 让视觉和语言"对齐"的预训练方法</li>
+  <li><strong>LLaVA 论文</strong>：<a href="https://arxiv.org/abs/2304.08485">Visual Instruction Tuning</a> — 最简单的多模态 LLM 方案</li>
+  <li><strong>Qwen2-VL 论文</strong>：<a href="https://arxiv.org/abs/2409.12191">Qwen2-VL: Enhancing Vision-Language Model's Perception</a> — 工业级多模态最佳实践</li>
+</ul>
+
+<p>有任何不清楚的地方，随时问我！我是你的 AI 老师，可以用更土的比喻、更多的算例来解释。</p>
+
+<div class="nav-links">
+<p>📖 参考：<a href="../reference/image-video-tokenization.html">图片与视频 Token 化速查表</a></p>
+<p>📖 关联课程：<a href="../lessons/0001-kv-cache.html">KV Cache</a> · <a href="../lessons/0002-moe-vs-dense.html">MoE vs Dense</a></p>
+</div>
+
+</div>
+</body>
+</html>

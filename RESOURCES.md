@@ -42,3 +42,26 @@
 | YaRN: Efficient Context Window Extension (2023) | 上下文扩展 | ⭐⭐ |
 | DeepSeek-R1 (2025) | GRPO + Reasoning | ⭐⭐⭐ |
 | Llama 2: Open Foundation and Fine-Tuned Chat Models (2023) | SFT + RLHF | ⭐⭐ |
+
+## 视觉/多模态
+
+### ViT — Vision Transformer (2021)
+- **论文**: https://arxiv.org/abs/2010.11929
+- **核心贡献**: 把图片切 patches → 线性投影 → 当 token 序列用 Transformer 处理
+- **重要性**: 多模态模型的基础视觉编码器
+
+### CLIP — Contrastive Language-Image Pre-training (2021)
+- **论文**: https://arxiv.org/abs/2103.00020
+- **核心贡献**: 图片编码器 + 文本编码器，对比学习对齐视觉和语言空间
+- **重要性**: 多模态 LLM 的"翻译官"
+
+### LLaVA (2023)
+- **论文**: https://arxiv.org/abs/2304.08485
+- **GitHub**: https://github.com/haotian-liu/LLaVA
+- **核心贡献**: 最简单的多模态方案——CLIP 视觉编码器 + 线性投影层 + LLM
+- **重要性**: 证明了"投影层就够了"，引发了多模态 LLM 热潮
+
+### Qwen2-VL (2024)
+- **论文**: https://arxiv.org/abs/2409.12191
+- **核心贡献**: 动态分辨率（每张图 token 数不一样）、多模态旋转位置编码、P2P 压缩
+- **重要性**: 工业级多模态模型的最佳实践案例

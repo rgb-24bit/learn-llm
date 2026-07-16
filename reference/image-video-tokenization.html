@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>图片与视频 Token 化 — 参考速查</title>
+<link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+<div class="container">
+
+<h1>📸 图片与视频 Token 化 — 参考速查</h1>
+<p class="meta">
+  <span class="tag tag-blue">reference</span>
+  <span>多模态 · 视觉编码</span>
+</p>
+
+<hr>
+
+<h2>核心思想</h2>
+<p>图片/视频是<strong>连续的像素网格</strong>，LLM 只能吃<strong>离散的 token 序列</strong>。解决方案：把图片切成小方块（patches），每个方块展平后线性投影成一个向量——这样就有了「视觉 token」。</p>
+
+<hr>
+
+<h2>ViT 基本流程（图片 → 视觉 token）</h2>
+<pre><code>输入图片 (224×224×3)
+    │
+    ▼
+切 patches (16×16) → 14×14 = 196 个 patch
+    │
+    ▼
+每个 patch 展平 (16×16×3 = 768 个像素值)
+    │
+    ▼
+线性投影 (768 → d_model) → 每个 patch 变成一个向量
+    │
+    ▼
+加上位置编码 → 196 个视觉 token
+    │
+    ▼
+送入 Transformer encoder</code></pre>
+
+<h3>关键参数</h3>
+<table>
+  <tr><th>参数</th><th>常见值</th><th>含义</th></tr>
+  <tr><td>Patch Size</td><td>14, 16, 32</td><td>每个小方块的边长（像素）</td></tr>
+  <tr><td>Grid Size</td><td>14×14, 16×16</td><td>图片被切成了几行几列</td></tr>
+  <tr><td>Token 数</td><td>196, 256</td><td>Grid 的行 × 列</td></tr>
+  <tr><td>d_model</td><td>768, 1024, 1280</td><td>每个视觉 token 的向量维度</td></tr>
+</table>
+
+<hr>
+
+<h2>多模态 LLM 的三种接法</h2>
+
+<div class="card">
+<div class="card-title">🔗 1. 投影层法（LLaVA 方案）</div>
+<p>视觉 token 经过一个 <strong>MLP 投影层</strong>，映射到 LLM 的 token embedding 空间。然后拼在文本 token 前面。</p>
+<pre><code>[视觉 token × 196] → [投影层] → [对齐后的 token × 196]
+                                          ↓
+                     ┌────────────────────┐
+                     │  [img_token][img_token]...[sys_prompt][user text][assistant] │
+                     └────────────────────┘
+                              ↑ 直接拼起来
+                     LLM 当它是普通 token 序列处理</code></pre>
+<div class="sidenote">优点：简单，改动小。缺点：视觉 token 全是图像底层信息，没有语义抽象。</div>
+</div>
+
+<div class="card">
+<div class="card-title">🔄 2. 交叉注意力法（Flamingo / LLaMA 3.2 Vision）</div>
+<p>LLM 每层在 self-attention 之外多一套 cross-attention 层，专门"看"视觉 token。视觉 token 不跟文本 token 拼在一起，而是<strong>每层主动去读</strong>图片信息。</p>
+<pre><code>文本 token: [t₁][t₂][t₃]... → self-attention → cross-attention → FFN
+                                                       ↑
+                                              视觉 token: [v₁][v₂][v₃]...</code></pre>
+<div class="sidenote">优点：视觉和文本各自保持独立空间。缺点：架构改动大，每层多一套参数。</div>
+</div>
+
+<div class="card">
+<div class="card-title">📦 3. Q-Former 压缩法（BLIP-2 / InstructBLIP）</div>
+<p>引入一组「学习出来的查询向量（learned queries）」，通过 cross-attention 从视觉 token 中提取信息，<strong>压缩成更少的 token</strong>。</p>
+<pre><code>视觉 token × 256 → [cross-attention] ← 可学习的 32 个查询
+                      ↓
+             压缩后的视觉 token × 32 → 输入 LLM</code></pre>
+<div class="sidenote">优点：可大幅减少视觉 token 数量（256→32）。缺点：多一个模块要训练。</div>
+</div>
+
+<hr>
+
+<h2>Token 数量对比</h2>
+<table>
+  <tr><th>内容</th><th>Token 数</th><th>说明</th></tr>
+  <tr><td>一句英文 "Hello world"</td><td><strong>2</strong></td><td>BPE 分词后 2 个 token</td></tr>
+  <tr><td>一段中文 100 字</td><td><strong>~100</strong></td><td>中文约 1 字 ≈ 1 token</td></tr>
+  <tr><td>一张 224×224 图（ViT）</td><td><strong>196</strong></td><td>14×14 个 patch</td></tr>
+  <tr><td>一张高清图 1024×1024</td><td><strong>~4096</strong></td><td>32×32 个 patch</td></tr>
+  <tr><td>一段 10 秒视频（每秒 1 帧）</td><td><strong>~2000</strong></td><td>10 帧 × ~200 tokens/帧</td></tr>
+  <tr><td>一段 30 秒视频（每秒 1 帧）</td><td><strong>~6000</strong></td><td>已超过很多模型的上下文窗口</td></tr>
+</table>
+
+<hr>
+
+<h2>视频 token 化的特殊挑战</h2>
+<table>
+  <tr><th>方法</th><th>原理</th><th>优缺点</th></tr>
+  <tr>
+    <td>帧采样</td>
+    <td>每隔 N 帧取一张，送 ViT</td>
+    <td>简单，但丢帧间运动信息</td>
+  </tr>
+  <tr>
+    <td>3D 时空 patch</td>
+    <td>把视频切成小立方体（Time×H×W）</td>
+    <td>保留时间维度，但参数量×时间轴长度</td>
+  </tr>
+  <tr>
+    <td>因果 3D 卷积 (CausalConv3D)</td>
+    <td>只利用过去帧的信息编码当前帧</td>
+    <td>适合流式处理，但实现复杂</td>
+  </tr>
+  <tr>
+    <td>时空压缩编码器</td>
+    <td>专用编码器把多帧压缩成少量 token</td>
+    <td>效率高，但需要额外训练</td>
+  </tr>
+</table>
+
+<hr>
+
+<h2>动态分辨率（Qwen2-VL 方案）</h2>
+<p>传统 ViT 只能处理固定分辨率。Qwen2-VL 的做法：</p>
+<ul>
+  <li>把原图按比例缩放到多个候选尺寸</li>
+  <li>切 patches 时，保持 patch size 不变，但 grid 大小自适应</li>
+  <li>不同分辨率的图自然产生不同数量的 token</li>
+  <li>用 M-ROPE（多模态位置编码）区分文本位置和图像位置</li>
+  <li><strong>结果</strong>：一张 1680×2560 的竖屏照片约 2560 个视觉 token；一张 420×640 的缩略图约 160 个</li>
+</ul>
+
+<hr>
+
+<h2>一句话总结</h2>
+<div class="callout info">
+<strong>图片 token 化</strong> = 切 patches → 线性投影 → 得到视觉 token 序列。<br>
+<strong>视频 token 化</strong> = 逐帧取图 → 每帧当图片处理 → 沿时间轴拼起来（但需要机制避免 token 爆炸）。<br>
+<strong>多模态 LLM</strong> = 视觉 token + 文本 token → 同一网络处理。
+</div>
+
+<div class="nav-links">
+<p>📖 课程：<a href="../lessons/0003-image-video-tokenization.html">0003 — 图片与视频 Token 化详解</a></p>
+<p>📚 论文：<a href="https://arxiv.org/abs/2010.11929">ViT: An Image is Worth 16×16 Words</a> · <a href="https://arxiv.org/abs/2304.08485">LLaVA</a> · <a href="https://arxiv.org/abs/2409.12191">Qwen2-VL</a></p>
+</div>
+
+</div>
+</body>
+</html>
