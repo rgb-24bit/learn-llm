@@ -33,6 +33,7 @@
 - ✅ **多模态训练机制**：CLIP 对比学习、对齐→SFT 三阶段、模型三件套架构
 - ✅ **Pretrain 训练循环**：前向→Loss→反向→梯度累积→AdamW→学习率衰减，每个 step 的完整流程
 - ✅ **SFT 与 LoRA**：Loss masking、Full SFT vs LoRA 对比、低秩分解原理
+- ✅ **SFT 深层机制**：Pretrain（可能的token）→ SFT（应该的token）→ DPO（更好的token），三个层面的生效方式（Attention指令识别、FFN知识路由、概率压低错误项），SFT不改变知识只改变使用方式
 - ✅ **Scaling Law**：PPL ∝ N^(-0.076)，Chinchilla 1:20 法则，边际递减
 
 ### 待学（按优先级）
