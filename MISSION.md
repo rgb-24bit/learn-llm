@@ -24,7 +24,7 @@
 - ✅ 阶段4（后训练）：SFT & LoRA ✓ | DPO & GRPO ✓
 
 进行中：
-- 🔄 阶段5（评估与数据）：LLM 基准全景 ✓ | MMLU 深度解读 | GSM8K 推理评估 | HumanEval | 数据配比 | Chatbot Arena
+- 🔄 阶段5（评估与数据）：LLM 基准全景 ✓ | 训练数据来源与优化 ✓ | MMLU 深度解读 | GSM8K 推理评估 | HumanEval | 数据配比 | Chatbot Arena
 
 ## 参考资料源
 

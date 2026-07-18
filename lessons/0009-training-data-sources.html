@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>训练数据的来源与优化 — 从 Common Crawl 到 FineWeb</title>
+<link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+<div class="container">
+
+<h1>💾 训练数据的来源与优化</h1>
+<p class="meta">
+  <span class="tag tag-blue">lesson 0009</span>
+  <span>阶段 5 — 评估与数据 · 数据篇</span>
+</p>
+
+<p>
+前面我们学了模型怎么训练、怎么评估。但有个问题一直没回答——<strong>训练数据到底从哪来的？</strong>
+</p>
+
+<p>
+别忘了，GPT-3 训练了大约 3,000 亿 token，Llama 3 训练了 15 万亿 token。这些数据不可能靠人工写出来。它们来自一个巨大的、充满噪音的、需要精心处理的来源——<strong>整个互联网</strong>。
+</p>
+
+<p>
+这节课就讲三件事：<strong>数据从哪来、怎么洗、怎么配</strong>。
+</p>
+
+<hr>
+
+<h2>1. 数据从哪来？</h2>
+
+<h3>1.1 Common Crawl — LLM 数据的"石油"</h3>
+
+<p>
+<strong>Common Crawl</strong> 是一个非营利组织，从 2008 年开始定期抓取整个互联网的网页快照。每个月抓取一次，每次产生几十 TB 的原始数据。它占了几乎所有 LLM 训练数据的 <strong>80% 以上</strong>。
+</p>
+
+<div class="card">
+  <div class="card-title">典型 LLM 的数据来源构成（Llama 3 级别）</div>
+  <table>
+    <tr><th>来源</th><th>占比</th><th>特点</th></tr>
+    <tr><td>Common Crawl（网页）</td><td>~80%</td><td>最大量，但质量参差不齐</td></tr>
+    <tr><td>Wikipedia</td><td>~3-5%</td><td>高质量，但量小</td></tr>
+    <tr><td>书籍（Books）</td><td>~5-10%</td><td>高质量长篇文本，通常受版权限制</td></tr>
+    <tr><td>学术论文（arXiv/PubMed）</td><td>~2-5%</td><td>专业知识和推理</td></tr>
+    <tr><td>代码（GitHub）</td><td>~5-10%</td><td>代码能力的基础</td></tr>
+    <tr><td>其他（Reddit/社交媒体等）</td><td>~2%</td><td>对话风格/多样性</td></tr>
+  </table>
+</div>
+
+<div class="callout tip">
+  <strong>关键认知</strong>：光靠 Wikipedia 是远远不够的。整个 Wikipedia 英文版才约 40 亿词，是 Llama 3 训练数据的 <strong>1/3000</strong>。没有 Common Crawl，任何大模型都训不出来。
+</div>
+
+<h3>1.2 高质量来源为什么重要</h3>
+
+<p>
+虽然 Common Crawl 是主力，但不同来源提供不同的能力：
+</p>
+
+<table>
+  <tr><th>来源</th><th>给模型带来了什么</th><th>类比</th></tr>
+  <tr><td>Wikipedia</td><td>结构化知识、事实准确性</td><td>教科书——精炼、可信</td></tr>
+  <tr><td>书籍</td><td>长篇推理、叙事连贯性</td><td>长篇小说——学会"一直讲一件事"</td></tr>
+  <tr><td>学术论文</td><td>逻辑论证、专业知识</td><td>研究论文——学会严谨推理</td></tr>
+  <tr><td>代码</td><td>逻辑思维、精确表达</td><td>代码仓库——学会"说一不二"</td></tr>
+  <tr><td>社交媒体</td><td>对话风格、口语表达</td><td>朋友圈——学会日常聊天</td></tr>
+</table>
+
+<div class="callout warn">
+  <strong>注意</strong>：Common Crawl 里本来就包含 Wikipedia 和 GitHub 的内容（爬虫会抓取这些网站）。所以实际上的"数据来源"不是独立分类，而是从 Common Crawl 这个大海里<strong>筛选不同区域</strong>的结果。
+</div>
+
+<hr>
+
+<h2>2. 数据清洗流水线</h2>
+
+<p>
+从 Common Crawl 抓下来的原始数据长什么样？大概像这样：
+</p>
+
+<div class="diagram">
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8">
+<title>🛒 Buy Cheap Viagra Online!!! - Best Prices</title>
+<!-- 50 行广告脚本 -->
+</head>
+<body>
+  <div id="ad-banner">...</div>
+  <div class="content">
+    <p>Welcome to my blog. Today...</p>
+    <p>（后面跟了一段从 Wikipedia 抄的文本）</p>
+  </div>
+  <div id="footer">访客统计: 12345 | 友情链接...</div>
+</body>
+</html>
+</div>
+
+<p>这需要经过一系列清洗步骤：</p>
+
+<h3>Step 1: HTML 提取</h3>
+<p>
+把 HTML 标签去掉，只留下可视文本。工具如 <strong>jusText</strong> 或 <strong>trafilatura</strong> 还能识别导航栏、广告区域，只保留正文内容。
+</p>
+
+<h3>Step 2: 语言识别</h3>
+<p>
+用 <strong>FastText</strong> 或 <strong>langid</strong> 判断文本是什么语言。只需要英文的话，就把中文、俄文、阿拉伯文等全部扔掉。
+</p>
+
+<div class="callout warn">
+  <strong>大坑</strong>：很多英文网页里有大量非英文内容（比如技术博客里嵌入的中文评论）。语言分类器可能因为标题是英文就判定整页是英文，结果混入了大量噪音。
+</div>
+
+<h3>Step 3: 启发式过滤（Heuristic Filtering）</h3>
+<p>
+用简单的规则快速筛掉明显的"垃圾"——这是成本最低的过滤方式。
+</p>
+
+<table>
+  <tr><th>过滤规则</th><th>去掉什么</th></tr>
+  <tr><td>长度过滤</td><td>少于 50 个字符的段落（标题页、404）</td></tr>
+  <tr><td>符号比例</td><td>标点符号占比过高的文本（数据表格、乱码）</td></tr>
+  <tr><td>重复行比例</td><td>同一行出现 30 次以上的（模板文本）</td></tr>
+  <tr><td>停用词密度</td><td>英文停用词（the/a/an/is）占比太低 → 可能不是自然语言</td></tr>
+  <tr><td>URL 占比</td><td>文本里链接太多的（导航页、聚合页）</td></tr>
+  <tr><td>整句比例</td><td>句号结尾的句子不足 50%（碎片文本）</td></tr>
+  <tr><td>内容类型</td><td>去掉"赌博/色情/黑五/购买"等关键词</td></tr>
+</table>
+
+<p>
+FineWeb（Hugging Face 2024 年发布的 15 万亿 token 数据集）从 50 多种候选过滤规则中只保留了 7 种最有效的——发现大多数规则对模型效果没有帮助。
+</p>
+
+<h3>Step 4: 去重（Deduplication）</h3>
+<p>
+互联网上充满了<strong>重复和近似重复</strong>的内容——同一篇文章被不同网站转载、同一段代码在 Stack Overflow 和 GitHub 各出现一次。去重是提升数据质量最关键的一步。
+</p>
+
+<p>去重分三个层次：</p>
+
+<div class="card">
+  <div class="card-title">去重的三个层次</div>
+  <table>
+    <tr><th>层次</th><th>方法</th><th>效果</th><th>计算成本</th></tr>
+    <tr>
+      <td>1. 精确去重</td>
+      <td>计算每篇文档的 hash，只保留一份</td>
+      <td>去掉完全相同的副本</td>
+      <td>低（O(n)）</td>
+    </tr>
+    <tr>
+      <td>2. 模糊去重</td>
+      <td>MinHash + LSH——把文档转成指纹，找相似度高的</td>
+      <td>去掉几乎一样的（改动几个词的抄袭文章）</td>
+      <td>中（O(n log n)）</td>
+    </tr>
+    <tr>
+      <td>3. 语义去重</td>
+      <td>用 embedding 找语义相似的文档</td>
+      <td>去掉同一事件不同报道（内容实质重复）</td>
+      <td>高（需要跑模型）</td>
+    </tr>
+  </table>
+</div>
+
+<p>
+<strong>模糊去重（MinHash）</strong> 是最常用的方法。它怎么工作？
+</p>
+
+<div class="diagram">
+文档 → 拆成 n-gram（连续 n 个词，比如 5-gram）
+  → 每个 n-gram 算一个 hash
+  → 用 MinHash 取最小值 → 得到一个"文档指纹"
+  → LSH（局部敏感哈希）把相似指纹分到同一个"桶"里
+  → 同一桶里的文档两两比较相似度
+  → 相似度 > 阈值（如 0.85）→ 只保留一个
+</div>
+
+<p>
+SlimPajama-DC 研究发现：<strong>全局去重</strong>（跨所有来源去重）比<strong>局部去重</strong>（各自去重）效果好得多——因为同一个知识可能同时出现在 Wikipedia 和 Common Crawl 里，各自去重删不掉交叉重复。
+</p>
+
+<h3>Step 5: 基于模型的过滤（Model-based Filtering）</h3>
+<p>
+启发式规则能筛掉明显的垃圾，但<strong>分不清"普通文章"和"高质量文章"</strong>。2024 年以来，最先进的清洗方法是用一个小模型来判断文档质量。
+</p>
+
+<div class="card">
+  <div class="card-title">FineWeb-Edu 的过滤方法（Hugging Face, 2024）</div>
+  <pre><code>1. 用 Llama 3 70B 给 50 万篇文档标注"教育质量"
+   → 每个文档打 1-5 分（完全没用 → 高度教育性）
+
+2. 用这些标注训练一个小分类器（基于 fastText）
+   → 只有 5 层神经网络，极轻量
+
+3. 把整个 FineWeb（15T token）过一遍分类器
+   → 保留分数 ≥ 3 的文档（约占总量 8~10%）
+
+4. 得到 FineWeb-Edu：1.3T token 的高质量教育数据
+
+结果：用 FineWeb-Edu 训练的模型，
+      MMLU 分数比用原始 FineWeb 高 5-10 个百分点！</code></pre>
+</div>
+
+<p>
+这就是<strong>"用大模型来教小模型怎么挑数据"</strong>——Llama 3 70B 当评委，fastText 当执行者。成本低、效果好。
+</p>
+
+<div class="callout warn">
+  <strong>代价</strong>：这种过滤会筛掉 90% 的数据。FineWeb-Edu 只有 1.3T token，只有原始 FineWeb 的 8.7%。对于超大模型（如 Llama 3 405B 需要 15T token），光靠高质数据不够——你只能反复重复看同一份数据，效果反而变差。
+</div>
+
+<h3>Full Pipeline 一览</h3>
+
+<div class="diagram">
+Common Crawl（~50TB/月 原始 HTML）
+      │
+      ▼
+Step 1: HTML → 纯文本（jusText / trafilatura）
+      │
+      ▼
+Step 2: 语言识别（FastText）
+      │
+      ▼
+Step 3: 启发式过滤（长度/符号/重复率）
+      │
+      ▼
+Step 4: 去重（精确 + MinHash 模糊去重）
+      │
+      ▼
+Step 5: 模型质量过滤（FineWeb-Edu 分类器）
+      │
+      ▼
+最终训练集（万亿 token 级别）
+</div>
+
+<hr>
+
+<h2>3. 数据混合（Data Mixing）</h2>
+
+<p>
+数据洗完了，每种来源都有了一大堆。接下来就是<strong>按什么比例混在一起</strong>。
+</p>
+
+<h3>SlimPajama-DC 的实验发现</h3>
+<p>
+Cerebras 和 MBZUAI 的研究人员在 2023 年发表了 SlimPajama-DC 研究，系统性地对比了不同数据混合策略。他们的核心发现：
+</p>
+
+<ol>
+  <li><strong>代码不能少</strong>——去掉代码后，模型在推理任务上明显变差。代码训练了模型的"逻辑思维"</li>
+  <li><strong>书籍比例要多</strong>——书籍提供长篇推理能力，对知识型基准（MMLU）提升明显</li>
+  <li><strong>Wikipedia 量小但值钱</strong>——虽然占比小，但增量收益极高</li>
+  <li><strong>多样性很关键</strong>——全局去重后，来源多样性对模型泛化很重要</li>
+</ol>
+
+<h3>典型数据配比</h3>
+
+<table>
+  <tr><th>数据源</th><th>Llama 1 配比</th><th>Llama 2</th><th>Common Corpus</th></tr>
+  <tr><td>Common Crawl</td><td>67%</td><td>~89%</td><td>~75%</td></tr>
+  <tr><td>Wikipedia</td><td>4.5%</td><td>~2.5%</td><td>~5%</td></tr>
+  <tr><td>书籍</td><td>15%</td><td>~4%</td><td>~10%</td></tr>
+  <tr><td>代码</td><td>4.5%</td><td>~3%</td><td>~7%</td></tr>
+  <tr><td>学术论文</td><td>4.5%</td><td>—</td><td>~3%</td></tr>
+  <tr><td>其他</td><td>4.5%</td><td>~1.5%</td><td>—</td></tr>
+</table>
+
+<div class="callout tip">
+  <strong>注意</strong>：这些配比是<strong>最终训练集</strong>的占比。但因为去重和过滤会不均匀地淘汰不同来源的内容，原始输入比例会完全不一样。比如 Common Crawl 原始占比是 99%+，但经过过滤后可能只剩 80%。
+</div>
+
+<h3>Chinchilla 法则的数据面</h3>
+<p>
+你还记得阶段 3 学过的 <strong>Scaling Law</strong> 吗？Chinchilla 说"20 token 比 1 参数"。但这里有个隐藏前提——<strong>用的数据质量足够高</strong>。
+</p>
+
+<p>
+如果你的数据全是垃圾，那 100 个 token 也比不上 1 个参数。反过来，FineWeb-Edu 这类超高质量数据可以用更少的 token 达到同样的 MMLU 分数——也就是说<strong>数据质量可以"节约"数据量</strong>。
+</p>
+
+<hr>
+
+<h2>4. 数据污染与去污染</h2>
+
+<p>
+<strong>数据污染</strong>（Data Contamination）是指：<strong>测试集的内容不小心混进了训练数据</strong>。
+</p>
+
+<p>
+因为 Common Crawl 是抓取整个互联网的，而 MMLU/GSM8K/HumanEval 的测试集又都是公开在网上的——你不刻意排除它们，它们就自动存在于训练数据里。
+</p>
+
+<p>
+后果：模型在测试集上的得分<strong>高得虚假</strong>，因为它已经"见过答案"了。
+</p>
+
+<h3>去污染的典型做法</h3>
+<div class="diagram">
+1. 准备"污染检测集"
+   → 收集所有要评估的 benchmark 的测试数据
+
+2. 对每篇训练文档，检测是否和测试数据重叠
+   → 精确匹配：直接 substring 搜索
+   → 近似匹配：n-gram 重叠率 > 阈值
+
+3. 发现重叠 → 删除整篇文档
+
+4. 难题：变体污染（Paraphrased Contamination）
+   → 测试题被改写后出现在训练数据中
+   → 无法通过精确/近似匹配检测
+   → 仍然会拉升分数
+</div>
+
+<h3>动态基准——数据污染的终极解决方案</h3>
+<p>
+既然静态测试集注定会被污染，行业正在转向<strong>动态基准</strong>（如 LiveBench）：每月更新全新题目，确保模型没机会提前"见过"。
+</p>
+
+<hr>
+
+<h2>5. SFT/LoRA 的数据特点</h2>
+
+<p>
+上面讲的主要是 Pretrain 数据。对于 SFT 数据，情况不太一样：
+</p>
+
+<table>
+  <tr><th>维度</th><th>Pretrain 数据</th><th>SFT 数据</th></tr>
+  <tr><td>数据量</td><td>万亿 token</td><td>几千~百万条对话</td></tr>
+  <tr><td>来源</td><td>Common Crawl 自动抓取</td><td>人工 + 模型生成 + 混合</td></tr>
+  <tr><td>清洗重点</td><td>去噪、去重</td><td>去错（回答质量审查）</td></tr>
+  <tr><td>多样性</td><td>来源多样性</td><td>场景多样性</td></tr>
+  <tr><td>格式</td><td>纯文本</td><td>对话格式（role/content）</td></tr>
+</table>
+
+<p>
+SFT 数据的<strong>质量 > 数量</strong>是一个非常强的结论。InstructGPT 只用 13K 条高质量人工标注就训练出了远超 GPT-3 的对话能力。2023 年周伯峰等人的论文也发现：<strong>用 1,000 条精心挑选的数据做 SFT，效果可以比 50,000 条未筛选的数据好</strong>。
+</p>
+
+<hr>
+
+<h2>6. 关键启示与应用</h2>
+
+<div class="card">
+  <div class="card-title">关于训练数据的三句话</div>
+  <ol>
+    <li><strong>Common Crawl 是石油，但需要精炼</strong>——原始数据 90% 是垃圾，不到 10% 是真正有用的</li>
+    <li><strong>去重 > 过滤</strong>——去掉重复数据比去掉低质数据的收益更大（因为重复数据让模型过拟合到常见模式）</li>
+    <li><strong>"用大模型挑数据"是最佳实践</strong>——用 Llama 3/FineWeb-Edu 分类器的方法，比启发式规则有效得多</li>
+  </ol>
+</div>
+
+<hr>
+
+<h2>7. 推荐阅读</h2>
+
+<ul>
+  <li><strong>FineWeb 论文</strong>：<a href="https://arxiv.org/abs/2406.17557">The FineWeb Datasets: Decanting the Web for the Finest Text Data at Scale</a>（Penedo et al., 2024）</li>
+  <li><strong>SlimPajama-DC</strong>：<a href="https://arxiv.org/abs/2309.10818">Understanding Data Combinations for LLM Training</a>（Shen et al., 2023）</li>
+  <li><strong>DCLM 论文</strong>：<a href="https://arxiv.org/abs/2406.11794">DataComp-LM: In Search of the Next Generation of Training Sets</a>（Li et al., 2024）</li>
+  <li><strong>Nemotron-CC</strong>：<a href="https://developer.nvidia.com/blog/building-nemotron-cc/">NVIDIA 的 6.3T token 高质量数据集</a>（2025）</li>
+  <li><strong>数据污染论文</strong>：<a href="https://arxiv.org/abs/2407.08716">A Taxonomy for Data Contamination in Large Language Models</a>（Palavalli et al., 2024）</li>
+  <li><strong>Datatrove</strong>：Hugging Face 开源的<strong>数据清洗工具</strong>：<a href="https://github.com/huggingface/datatrove">github.com/huggingface/datatrove</a></li>
+</ul>
+
+<hr>
+
+<p class="nav-links">
+  ← <a href="0008-llm-benchmark-zoo.html">上一课：LLM 基准全景</a> ·
+  <a href="../reference/benchmark-zoo.html">参考：基准速查表</a>
+</p>
+
+<p class="sidenote">
+  有不明白的地方欢迎追问！下一节课我们可以深挖 MMLU 的具体评分机制，或者继续看怎么用数据配比来针对性提升模型在某个基准上的表现。
+</p>
+
+</div>
+</body>
+</html>

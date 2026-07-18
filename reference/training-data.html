@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>训练数据速查表</title>
+<link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+<div class="container">
+
+<h1>📦 训练数据速查表</h1>
+<p class="meta"><span class="tag tag-green">reference</span> 阶段 5 — 评估与数据</p>
+
+<h2>一、数据来源</h2>
+<table>
+  <tr><th>来源</th><th>占训练集</th><th>提供什么</th><th>典型数据集</th></tr>
+  <tr><td>Common Crawl</td><td>~80%</td><td>体量、多样性</td><td>FineWeb, DCLM, C4, RefinedWeb</td></tr>
+  <tr><td>Wikipedia</td><td>~3-5%</td><td>结构化知识、事实准确</td><td>Wikipedia dump</td></tr>
+  <tr><td>书籍</td><td>~5-10%</td><td>长篇推理、叙事</td><td>BooksCorpus, Gutenberg</td></tr>
+  <tr><td>学术论文</td><td>~2-5%</td><td>专业知识、逻辑</td><td>arXiv, PubMed</td></tr>
+  <tr><td>代码</td><td>~5-10%</td><td>逻辑思维、精确</td><td>GitHub (The Stack, StarCoder)</td></tr>
+  <tr><td>社交媒体</td><td>~2%</td><td>对话风格</td><td>Reddit, Twitter</td></tr>
+</table>
+
+<hr>
+
+<h2>二、清洗流水线（5 步）</h2>
+
+<table>
+  <tr><th>步骤</th><th>做什么</th><th>常用工具</th></tr>
+  <tr><td>1. HTML 提取</td><td>去掉 HTML 标签、广告、导航栏</td><td>jusText, trafilatura, resilience</td></tr>
+  <tr><td>2. 语言识别</td><td>判断文档是什么语言</td><td>FastText, langid, pycld3</td></tr>
+  <tr><td>3. 启发式过滤</td><td>按长度/符号比例/重复率筛掉垃圾</td><td>FineWeb 7 规则, CCNet</td></tr>
+  <tr><td>4. 去重</td><td>精确+模糊去重，去掉重复内容</td><td>MinHash+LSH (datasketch)</td></tr>
+  <tr><td>5. 模型质量过滤</td><td>用分类器判断教育/质量</td><td>FineWeb-Edu classifier, DCLM quality filter</td></tr>
+</table>
+
+<h3>启发式过滤常用规则</h3>
+<table>
+  <tr><th>规则</th><th>阈值</th><th>过滤目标</th></tr>
+  <tr><td>最小文档长度</td><td>&lt; 50 字符</td><td>标题页、404</td></tr>
+  <tr><td>最大文档长度</td><td>&gt; 100K 字符</td><td>数据 dump、日志</td></tr>
+  <tr><td>标点符号比例</td><td>&gt; 30%</td><td>乱码、数据表格</td></tr>
+  <tr><td>最长行重复比</td><td>&gt; 30 次</td><td>模板文本</td></tr>
+  <tr><td>整句比例</td><td>&lt; 50%</td><td>碎片文本</td></tr>
+  <tr><td>停用词密度</td><td>&lt; 2%</td><td>非自然语言</td></tr>
+  <tr><td>URL 占比</td><td>&gt; 20%</td><td>导航页/聚合页</td></tr>
+</table>
+
+<hr>
+
+<h2>三、去重方法</h2>
+<table>
+  <tr><th>方法</th><th>技术</th><th>复杂度</th><th>场景</th></tr>
+  <tr><td>精确去重</td><td>SHA256 hash</td><td>O(n)</td><td>完全相同的文档</td></tr>
+  <tr><td>模糊去重</td><td>MinHash + LSH</td><td>O(n log n)</td><td>近似重复（抄袭/转载）</td></tr>
+  <tr><td>语义去重</td><td>Embedding + 向量相似度</td><td>高</td><td>同一事件的多种报道</td></tr>
+  <tr><td>URL 去重</td><td>URL 规范化 + 哈希</td><td>O(n)</td><td>同一 URL 多次被抓取</td></tr>
+</table>
+
+<hr>
+
+<h2>四、关键数据集</h2>
+
+<table>
+  <tr><th>数据集</th><th>发布</th><th>规模</th><th>特点</th></tr>
+  <tr><td>C4</td><td>2019</td><td>~750 GB</td><td>最早的 Common Crawl 清洗数据</td></tr>
+  <tr><td>RefinedWeb</td><td>2023</td><td>~5T token</td><td>Falcon 模型的数据</td></tr>
+  <tr><td>RedPajama</td><td>2023</td><td>~1.2T token</td><td>重建 LLaMA 数据配比</td></tr>
+  <tr><td>FineWeb</td><td>2024</td><td>~15T token</td><td>96 个 CC 快照，严格消融</td></tr>
+  <tr><td>FineWeb-Edu</td><td>2024</td><td>~1.3T token</td><td>高质量教育子集，MMLU 提升显著</td></tr>
+  <tr><td>DCLM-Baseline</td><td>2024</td><td>~2.6T token</td><td>模型过滤，对标 Mistral 7B</td></tr>
+  <tr><td>Nemotron-CC</td><td>2025</td><td>~6.3T token</td><td>NVIDIA，含合成数据</td></tr>
+</table>
+
+<hr>
+
+<h2>五、数据配比参考</h2>
+<table>
+  <tr><th>来源</th><th>Llama 1 (1T)</th><th>Llama 2 (2T)</th><th>SlimPajama</th></tr>
+  <tr><td>Common Crawl</td><td>67%</td><td>~89%</td><td>~72%</td></tr>
+  <tr><td>Wikipedia</td><td>4.5%</td><td>~2.5%</td><td>~10%</td></tr>
+  <tr><td>书籍</td><td>15%</td><td>~4%</td><td>~6%</td></tr>
+  <tr><td>代码</td><td>4.5%</td><td>~3%</td><td>~7%</td></tr>
+  <tr><td>学术论文</td><td>4.5%</td><td>—</td><td>~5%</td></tr>
+</table>
+
+<hr>
+
+<h2>六、SFT 数据特点</h2>
+<table>
+  <tr><th>维度</th><th>Pretrain</th><th>SFT</th></tr>
+  <tr><td>规模</td><td>万亿 token</td><td>几千~百万条</td></tr>
+  <tr><td>来源</td><td>自动抓取</td><td>人工 / 合成 / 混合</td></tr>
+  <tr><td>清洗重点</td><td>去噪去重</td><td>回答质量审查</td></tr>
+  <tr><td>格式</td><td>纯文本</td><td>对话 (role/content)</td></tr>
+  <tr><td>关键原则</td><td>多样性</td><td>质量 > 数量</td></tr>
+</table>
+
+<hr>
+
+<h2>七、数据污染类型</h2>
+<table>
+  <tr><th>类型</th><th>描述</th><th>检测难度</th><th>影响</th></tr>
+  <tr><td>精确污染</td><td>测试题原文出现在训练数据</td><td>易（子串匹配）</td><td>最高</td></tr>
+  <tr><td>近似污染</td><td>小幅改写的测试题</td><td>中（n-gram 匹配）</td><td>高</td></tr>
+  <tr><td>变体污染</td><td>改写/翻译后的测试题</td><td>难</td><td>中</td></tr>
+  <tr><td>领域污染</td><td>同领域的非测试内容</td><td>难</td><td>低（有帮助）</td></tr>
+</table>
+
+</div>
+</body>
+</html>

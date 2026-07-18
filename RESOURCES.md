@@ -69,6 +69,31 @@
 - **地址**: https://lmarena.ai/
 - **核心**: 匿名对战 + 人类投票 + Elo 评分
 
+### FineWeb
+- **论文**: https://arxiv.org/abs/2406.17557 — Penedo et al., 2024
+- **核心**: 15T token，96 个 CC 快照，7 条过滤规则
+- **子集 FineWeb-Edu**: 1.3T token，教育质量过滤，MMLU 提升 5-10%
+
+### DCLM (DataComp-LM)
+- **论文**: https://arxiv.org/abs/2406.11794 — Li et al., 2024
+- **核心**: 模型过滤，7B 模型 2.6T token 达 64% MMLU
+- **贡献**: 证明了模型分类器是筛选训练数据的最佳方法
+
+### Nemotron-CC
+- **链接**: https://developer.nvidia.com/blog/building-nemotron-cc/ — NVIDIA, 2025
+- **核心**: 6.3T token + 合成数据，Llama 3.1 8B +5 MMLU
+
+### 数据配比研究
+- **SlimPajama-DC**: https://arxiv.org/abs/2309.10818 — Shen et al., 2023
+- **核心**: 不同数据来源的配比对模型效果的影响
+
+### 数据污染
+- **论文**: https://arxiv.org/abs/2407.08716 — Palavalli et al., 2024
+- **核心**: 数据污染的完整分类体系
+
+### 清洗工具
+- **Datatrove**: https://github.com/huggingface/datatrove — HuggingFace 数据清洗工具框架
+
 ## 视觉/多模态
 
 ### ViT — Vision Transformer (2021)
