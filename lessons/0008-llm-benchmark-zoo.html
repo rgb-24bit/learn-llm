@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM 基准全景 — 一张图看懂所有测试</title>
+<link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+<div class="container">
+
+<h1>🧪 LLM 基准全景</h1>
+<p class="meta">
+  <span class="tag tag-blue">lesson 0008</span>
+  <span>阶段 5 — 评估与数据 · 概览</span>
+</p>
+
+<p>
+当一个新模型发布时，你肯定见过这样的表格：
+</p>
+
+<div class="card">
+  <div class="card-title">典型模型发布宣传页</div>
+  <pre><code>            MMLU    GSM8K   HumanEval   Arena Elo
+GPT-5       92.7%   97.1%   93.9%       1423
+Claude 4    91.5%   95.8%   91.5%       1408
+Llama 4     89.2%   93.4%   88.4%       1365</code></pre>
+</div>
+
+<p>
+这些数字决定了模型采购、技术选型、甚至公司声誉。但很少有人能说清：<strong>MMLU 到底测什么？GSM8K 的 97% 是真的会算数吗？HumanEval 能代表写代码的能力吗？Arena Elo 评分又是怎么算出来的？</strong>
+</p>
+
+<p>
+这节课就是你的基准全景图——把主流 LLM 测试按能力分类，每类讲清楚测什么、怎么测、有什么陷阱。
+</p>
+
+<hr>
+
+<h2>1. 基准的四个能力维度</h2>
+
+<p>
+LLM 的评估基准可以分成四大类，每类对应一种核心能力：
+</p>
+
+<table>
+  <tr><th>维度</th><th>测什么</th><th>代表基准</th><th>格式</th></tr>
+  <tr><td>🧠 知识广度</td><td>模型记住了多少事实</td><td>MMLU, HellaSwag, TruthfulQA</td><td>选择题</td></tr>
+  <tr><td>🔢 推理能力</td><td>多步逻辑/数学推导</td><td>GSM8K, MATH, GPQA</td><td>开放回答</td></tr>
+  <tr><td>💻 代码能力</td><td>能不能写出正确代码</td><td>HumanEval, MBPP, SWE-bench</td><td>函数生成</td></tr>
+  <tr><td>🗣️ 综合/人类偏好</td><td>对话质量、有用性</td><td>MT-Bench, Chatbot Arena</td><td>模型/人类评分</td></tr>
+</table>
+
+<p>
+注意这几个维度是<strong>正交的</strong>——一个模型可能知识渊博但数学很差，也可能代码写得飞起但一问常识就翻车。
+</p>
+
+<hr>
+
+<h2>2. 🧠 知识广度：MMLU</h2>
+
+<h3>它是什么</h3>
+<p>
+<strong>MMLU（Massive Multitask Language Understanding）</strong> 由加州大学伯克利分校的 Hendrycks 等人在 2020 年提出。它包含 <strong>15,908 道四选一选择题</strong>，覆盖 <strong>57 个学科</strong>——从抽象代数到世界宗教，从临床医学到商法，从大学物理到中学心理学。
+</p>
+
+<p>
+目标：测试模型在预训练阶段吸收了多少<strong>跨领域知识</strong>。
+</p>
+
+<h3>怎么测</h3>
+<ul>
+  <li><strong>评分方式</strong>：逐题看模型选的选项（A/B/C/D）是否和正确答案一致</li>
+  <li><strong>默认设定</strong>：5-shot —— 每道题前先给 5 个例子（同一学科），让模型学会答题格式</li>
+  <li><strong>随机基线</strong>：25%（4 选 1 瞎蒙）</li>
+  <li><strong>两种评分方法</strong>：<br>
+      — <strong>字母匹配</strong>：让模型生成文本，提取第一个 A/B/C/D 字母<br>
+      — <strong>Log-prob 打分</strong>：算出模型对 A/B/C/D 四个选项的对数概率，选最高的（更准确，因为模型可能不乱说字母）</li>
+</ul>
+
+<h3>具体数据</h3>
+<div class="card">
+  <div class="card-title">MMLU 核心数据</div>
+  <table>
+    <tr><th>属性</th><th>值</th></tr>
+    <tr><td>总题数</td><td>15,908</td></tr>
+    <tr><td>学科数</td><td>57</td></tr>
+    <tr><td>选项数</td><td>4（A/B/C/D）</td></tr>
+    <tr><td>随机基线</td><td>25%</td></tr>
+    <tr><td>人类专家</td><td>~89%</td></tr>
+    <tr><td>GPT-3 (2020)</td><td>~43%</td></tr>
+    <tr><td>前沿模型 (2026)</td><td>89–93%</td></tr>
+    <tr><td>四大学科分组</td><td>STEM · 人文 · 社科 · 其他</td></tr>
+  </table>
+</div>
+
+<div class="callout warn">
+  <strong>重要陷阱</strong>：选择题测的是<strong>「排除错误答案」</strong>，不是真正的知识。模型可能不认识病毒学，但认识「三个选项看起来不合理，选这个看起来合理的」。
+</div>
+
+<h3>MMLU-Pro — 更难版</h3>
+<p>
+因为 MMLU 已经被前沿模型打到了 90%+（接近天花板），2024 年有人推出了 <strong>MMLU-Pro</strong>：题目更难，选项从 4 个增加到 10 个，随机基线降到 10%。这样又拉开了模型差距。
+</p>
+
+<hr>
+
+<h2>3. 🔢 推理能力：GSM8K 与 MATH</h2>
+
+<h3>GSM8K — 小学数学应用题</h3>
+<p>
+<strong>GSM8K（Grade School Math 8K）</strong> 是 OpenAI 2021 年发布的基准，包含 <strong>8,500 道小学数学应用题</strong>。每道题需要 2–8 步算术推导才能解出。
+</p>
+
+<div class="card">
+  <div class="card-title">GSM8K 典型题目</div>
+  <pre><code>题目：贝斯有 23 个苹果。她给了茉莉 7 个，又买了 12 个。
+        她还有多少个苹果？
+
+正确推导：23 - 7 = 16
+          16 + 12 = 28
+答案：28</code></pre>
+</div>
+
+<p>
+GMS8K 的关键设计：题目<strong>必须逐步推理</strong>才能得到正确答案。模型如果只是「猜数字」很难蒙对。这推动了 <strong>Chain-of-Thought（思维链）</strong> 技术的普及——让模型先写推导过程再出答案。
+</p>
+
+<div class="callout warn">
+  <strong>重要陷阱——数据污染</strong>：GSM8K 已经被打到 99%。更严重的是，2023 年研究发现去掉和训练数据重叠的题目后，某些模型的分数从 95% 跌到 82%。说明模型<strong>记住了答案</strong>而不是真正会算。
+</div>
+
+<h3>MATH — 竞赛级数学</h3>
+<p>
+比 GSM8K 难得多——包含 <strong>12,500 道 AMC/AIME 级别的竞赛数学题</strong>（高中数学竞赛到大学预科）。2023 年时最好的模型也只做到 ~50%，现在前沿模型能到 85-90%。
+</p>
+
+<table>
+  <tr><th>基准</th><th>难度</th><th>题目数</th><th>前沿分数</th><th>饱和否？</th></tr>
+  <tr><td>GSM8K</td><td>小学应用</td><td>8,500</td><td>99%</td><td>✅ 饱和</td></tr>
+  <tr><td>MATH</td><td>竞赛级</td><td>12,500</td><td>~85%</td><td>⚠️ 接近中</td></tr>
+  <tr><td>AIME</td><td>美国数学邀请赛</td><td>30/年</td><td>~70%</td><td>❌ 未饱和</td></tr>
+</table>
+
+<hr>
+
+<h2>4. 💻 代码能力：HumanEval 与 SWE-bench</h2>
+
+<h3>HumanEval — LeetCode 级</h3>
+<p>
+OpenAI 发布 HumanEval 时自己也说：这个基准的名字其实有自嘲意味——<strong>「用人来评估」永远不是完美的，但总比没有好」</strong>。它包含 <strong>164 道 Python 编程题</strong>，每道题是一个函数签名 + 文档字符串 + 一组单元测试。
+</p>
+
+<p>
+模型的输出是完整的函数代码。评分标准：<strong>pass@k</strong>——生成 k 个候选，只要有一个通过所有单元测试就算过。
+</p>
+
+<div class="card">
+  <div class="card-title">pass@k 的实际推导</div>
+  <pre><code>常用的是 pass@1：只生成一次，看能不能跑通
+
+也可以 pass@5：生成 5 个版本，只要 1 个能跑通就算对
+→ 这给「随机多试几次」留了空间
+
+通过率 = 1 - (C[n-k][t] / C[n][t])
+其中 n=采样数, t=通过的次数, k=候选数</code></pre>
+</div>
+
+<h3>SWE-bench — 真正的"修 Bug"</h3>
+<p>
+HumanEval 的问题是太"LeetCode"了——写个独立函数和真正的软件工程差太远。<strong>SWE-bench</strong>（2024）翻了个大天：它要求模型面对<strong>一个真实的 GitHub 仓库 + 一个 Issue 描述</strong>，然后生成一个 pull request 级别的修复补丁。
+</p>
+
+<table>
+  <tr><th>维度</th><th>HumanEval</th><th>SWE-bench</th></tr>
+  <tr><td>任务</td><td>写一个独立函数</td><td>修一个真实的 Bug</td></tr>
+  <tr><td>上下文</td><td>一段 docstring</td><td>整个代码仓库</td></tr>
+  <tr><td>题目数</td><td>164</td><td>2,294</td></tr>
+  <tr><td>前沿分数</td><td>90%+</td><td>40–80%</td></tr>
+  <tr><td>难度</td><td>低</td><td>高（至今没人满分）</td></tr>
+  <tr><td>代表什么</td><td>算法能力</td><td>软件工程能力</td></tr>
+</table>
+
+<hr>
+
+<h2>5. 🗣️ 综合偏好：Chatbot Arena</h2>
+
+<h3>它是怎么运作的</h3>
+<p>
+由 LMSYS 组织运营的 <strong>Chatbot Arena</strong> 是目前最有影响力的综合对话质量排行榜。它的方法非常巧妙——<strong>让两个模型匿名对战，真人投票</strong>。
+</p>
+
+<div class="diagram">
+用户提出一个问题
+      ↓
+模型 A 和模型 B 各自回答（匿名，用户不知道谁是谁）
+      ↓
+用户阅读两个答案，投票选"更好的那个"
+      ↓
+系统用 Elo 算法更新两个模型的分数
+      ↓
+（Elo 评分来自国际象棋——赢了强手加很多分，输给弱手扣很多分）
+</div>
+
+<h3>Elo 评分的直觉</h3>
+<p>
+假设两个模型对战了无数次，每个模型拥有了一个 Elo 分数。那么预测 A 战胜 B 的概率：
+</p>
+
+<div class="card">
+  <div class="card-title">Elo 预测公式的直觉</div>
+  <pre><code>E_A = 1 / (1 + 10^((Elo_B - Elo_A) / 400))
+
+如果 Elo_A - Elo_B = 200：
+  → E_A = 1 / (1 + 10^(-0.5)) = 1 / (1 + 0.316) = 0.76
+  → 76% 的概率 A 赢
+
+如果 Elo_A - Elo_B = 0（分数相等）：
+  → E_A = 1 / (1 + 10^0) = 0.5
+  → 50% 的概率 A 赢</code></pre>
+</div>
+
+<p>
+实际更新：如果 A 赢了但预期胜率只有 40%，那 A 的 Elo 会加很多分。反之如果 A 赢了但预期胜率是 90%，那只加一点点。
+</p>
+
+<div class="callout tip">
+  <strong>为什么这个排行榜好</strong>：它不是测标准答案，而是测人类<strong>真的更喜欢哪个模型</strong>的对话。这比任何选择题都更接近真实使用体验。
+</div>
+
+<hr>
+
+<h2>6. 🧹 基准的四大陷阱</h2>
+
+<table>
+  <tr><th>陷阱</th><th>什么意思</th><th>典型例子</th></tr>
+  <tr>
+    <td>1. 饱和</td>
+    <td>所有模型都接近满分，基准失去区分度</td>
+    <td>GSM8K 99%、HellaSwag 95%+、MMLU 90%+</td>
+  </tr>
+  <tr>
+    <td>2. 数据污染</td>
+    <td>测试题出现在训练数据中，分数来自记忆而非能力</td>
+    <td>GSM8K 去掉重叠题后某些模型跌 13%</td>
+  </tr>
+  <tr>
+    <td>3. 格式刷分</td>
+    <td>模型学会答题格式而非内容</td>
+    <td>MMLU 选择题格式让模型靠排除法得分</td>
+  </tr>
+  <tr>
+    <td>4. 基准≠生产</td>
+    <td>满分基准不意味着在真实场景好用</td>
+    <td>HumanEval 满分但做不对实际 issue</td>
+  </tr>
+</table>
+
+<hr>
+
+<h2>7. 🗺️ 基准全景图</h2>
+
+<div class="card">
+  <div class="card-title">2026 年主流基准速查</div>
+  <table>
+    <tr><th>基准</th><th>类别</th><th>测什么</th><th>格式</th><th>前沿</th><th>饱和？</th></tr>
+    <tr><td>MMLU</td><td>知识</td><td>57 学科常识</td><td>4 选 1</td><td>93%</td><td>✅</td></tr>
+    <tr><td>MMLU-Pro</td><td>知识</td><td>更难版</td><td>10 选 1</td><td>~80%</td><td>⚠️</td></tr>
+    <tr><td>HellaSwag</td><td>常识</td><td>场景续写</td><td>4 选 1</td><td>95%+</td><td>✅</td></tr>
+    <tr><td>GSM8K</td><td>数学</td><td>小学应用题</td><td>开放</td><td>99%</td><td>✅</td></tr>
+    <tr><td>MATH</td><td>数学</td><td>竞赛级</td><td>开放</td><td>~85%</td><td>⚠️</td></tr>
+    <tr><td>GPQA</td><td>推理</td><td>研究生级问答</td><td>4 选 1</td><td>~94%</td><td>⚠️</td></tr>
+    <tr><td>HumanEval</td><td>代码</td><td>Python 函数</td><td>pass@k</td><td>90%+</td><td>✅</td></tr>
+    <tr><td>SWE-bench</td><td>代码</td><td>真实 Issue 修复</td><td>补丁通过率</td><td>~80%</td><td>❌</td></tr>
+    <tr><td>TruthfulQA</td><td>诚实</td><td>抵抗常见误解</td><td>开放</td><td>~70%</td><td>❌</td></tr>
+    <tr><td>C. Arena</td><td>综合</td><td>人类偏好</td><td>Elo</td><td>~1450</td><td>❌</td></tr>
+  </table>
+</div>
+
+<hr>
+
+<h2>8. 推荐阅读</h2>
+
+<ul>
+  <li><strong>MMLU 原始论文</strong>：<a href="https://arxiv.org/abs/2009.03300">Measuring Massive Multitask Language Understanding</a>（Hendrycks et al., 2020）</li>
+  <li><strong>GSM8K 论文</strong>：<a href="https://arxiv.org/abs/2110.14168">Training Verifiers to Solve Math Word Problems</a>（Cobbe et al., 2021）</li>
+  <li><strong>HumanEval 论文</strong>：<a href="https://arxiv.org/abs/2107.03374">Evaluating Large Language Models Trained on Code</a>（Chen et al., 2021）</li>
+  <li><strong>SWE-bench 论文</strong>：<a href="https://arxiv.org/abs/2310.06770">SWE-bench: Can Language Models Resolve Real-World GitHub Issues?</a>（Jimenez et al., 2024）</li>
+  <li><strong>Chatbot Arena</strong>：<a href="https://lmarena.ai/">LMSYS Chatbot Arena Leaderboard</a>（实时更新）</li>
+  <li><strong>LiveBench</strong>：<a href="https://livebench.ai/">每月更新的无污染基准</a></li>
+</ul>
+
+<hr>
+
+<p class="nav-links">
+  本课是阶段 5 的第一课 · <a href="../reference/benchmark-zoo.html">参考：基准速查表 →</a>
+</p>
+
+<p class="sidenote">
+  有不明白的地方随时问 Fairy！下一课我们可以深挖 MMLU 的完整评分机制，或者 GSM8K 的 Chain-of-Thought 评测细节。
+</p>
+
+</div>
+</body>
+</html>

@@ -37,5 +37,6 @@
 - ✅ **Scaling Law**：PPL ∝ N^(-0.076)，Chinchilla 1:20 法则，边际递减
 
 ### 待学（按优先级）
-1. ✅ SFT / LoRA
-2. DPO / GRPO
+1. ✅ LLM 基准全景（MMLU/GSM8K/HumanEval/SWE-bench/Chatbot Arena）
+2. ✅ SFT / LoRA
+3. ✅ DPO / GRPO

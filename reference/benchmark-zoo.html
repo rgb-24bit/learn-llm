@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM 基准速查表</title>
+<link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+<div class="container">
+
+<h1>📋 LLM 基准速查表</h1>
+<p class="meta"><span class="tag tag-green">reference</span> 阶段 5 — 评估与数据</p>
+
+<h2>一、知识类基准</h2>
+
+<h3>MMLU — Massive Multitask Language Understanding</h3>
+<table>
+  <tr><th>属性</th><th>值</th></tr>
+  <tr><td>发布年份</td><td>2020</td></tr>
+  <tr><td>论文</td><td>arXiv:2009.03300</td></tr>
+  <tr><td>题目类型</td><td>4 选 1 选择题</td></tr>
+  <tr><td>总题数</td><td>15,908</td></tr>
+  <tr><td>学科数</td><td>57（STEM/人文/社科/其他）</td></tr>
+  <tr><td>评分方式</td><td>准确率（字母匹配或 log-prob）</td></tr>
+  <tr><td>默认 shot</td><td>5-shot</td></tr>
+  <tr><td>随机基线</td><td>25%</td></tr>
+  <tr><td>人类水平</td><td>~89%</td></tr>
+  <tr><td>前沿（2026）</td><td>89–93%</td></tr>
+  <tr><td>陷阱</td><td>选择题利于排除法；前沿饱和中</td></tr>
+  <tr><td>后继</td><td>MMLU-Pro（10 选 1）</td></tr>
+</table>
+
+<h3>HellaSwag — 常识推理</h3>
+<table>
+  <tr><th>属性</th><th>值</th></tr>
+  <tr><td>发布</td><td>2019</td></tr>
+  <tr><td>格式</td><td>4 选 1（选最合理的情节结局）</td></tr>
+  <tr><td>题数</td><td>~10,000</td></tr>
+  <tr><td>人类水平</td><td>~95%</td></tr>
+  <tr><td>前沿</td><td>95%+（已饱和）</td></tr>
+</table>
+
+<h3>TruthfulQA — 抵抗误解</h3>
+<table>
+  <tr><th>属性</th><th>值</th></tr>
+  <tr><td>发布</td><td>2021</td></tr>
+  <tr><td>格式</td><td>开放回答（是否传播了常见错误观念）</td></tr>
+  <tr><td>题数</td><td>817</td></tr>
+  <tr><td>意义</td><td>测的是对齐质量，不是知识量</td></tr>
+  <tr><td>前沿</td><td>~70%（仍未饱和）</td></tr>
+</table>
+
+<hr>
+
+<h2>二、推理类基准</h2>
+
+<h3>GSM8K — 小学数学</h3>
+<table>
+  <tr><th>属性</th><th>值</th></tr>
+  <tr><td>发布</td><td>2021 (OpenAI)</td></tr>
+  <tr><td>题数</td><td>8,500</td></tr>
+  <tr><td>难度</td><td>2–8 步算术</td></tr>
+  <tr><td>前沿</td><td>99% ✅ 已饱和</td></tr>
+  <tr><td>核心贡献</td><td>推动了 Chain-of-Thought 普及</td></tr>
+  <tr><td>污染影响</td><td>去掉重复题后准确率降 ~13%</td></tr>
+</table>
+
+<h3>MATH — 竞赛数学</h3>
+<table>
+  <tr><th>属性</th><th>值</th></tr>
+  <tr><td>发布</td><td>2021</td></tr>
+  <tr><td>题数</td><td>12,500</td></tr>
+  <tr><td>难度</td><td>AMC / AIME 竞赛级</td></tr>
+  <tr><td>前沿</td><td>~85%（接近饱和）</td></tr>
+</table>
+
+<h3>GPQA — 研究生级问答</h3>
+<table>
+  <tr><th>属性</th><th>值</th></tr>
+  <tr><td>发布</td><td>2023</td></tr>
+  <tr><td>格式</td><td>4 选 1</td></tr>
+  <tr><td>难度</td><td>专家级（物理/生物/化学）</td></tr>
+  <tr><td>前沿</td><td>~94%（Gemini 3.1）</td></tr>
+  <tr><td>特点</td><td>即使专家也只有 ~65% 的准确率</td></tr>
+</table>
+
+<hr>
+
+<h2>三、代码类基准</h2>
+
+<h3>HumanEval</h3>
+<table>
+  <tr><th>属性</th><th>值</th></tr>
+  <tr><td>发布</td><td>2021 (OpenAI)</td></tr>
+  <tr><td>题数</td><td>164</td></tr>
+  <tr><td>任务</td><td>根据 docstring 写 Python 函数</td></tr>
+  <tr><td>评分</td><td>pass@k（通过单元测试）</td></tr>
+  <tr><td>前沿</td><td>90%+ ✅ 已饱和</td></tr>
+  <tr><td>不足</td><td>太独立，不反映真实工程</td></tr>
+</table>
+
+<h3>SWE-bench</h3>
+<table>
+  <tr><th>属性</th><th>值</th></tr>
+  <tr><td>发布</td><td>2024</td></tr>
+  <tr><td>题数</td><td>2,294</td></tr>
+  <tr><td>任务</td><td>修真实 GitHub Issue</td></tr>
+  <tr><td>评分</td><td>生成补丁通过测试</td></tr>
+  <tr><td>前沿</td><td>~80%（SWE-bench Verified）</td></tr>
+  <tr><td>特点</td><td>至今无模型满分，当前最难代码基准</td></tr>
+</table>
+
+<hr>
+
+<h2>四、综合/偏好类</h2>
+
+<h3>Chatbot Arena (LMSYS)</h3>
+<table>
+  <tr><th>属性</th><th>值</th></tr>
+  <tr><td>运营方</td><td>LMSYS（UC Berkeley）</td></tr>
+  <tr><td>地址</td><td>lmarena.ai</td></tr>
+  <tr><td>方法</td><td>匿名对战 → 人类投票 → Elo 评分</td></tr>
+  <tr><td>评分</td><td>Elo（基准 ~1000，前沿 ~1450）</td></tr>
+  <tr><td>优点</td><td>最接近真实使用体验</td></tr>
+  <tr><td>缺点</td><td>受人口偏差影响（投票者偏技术背景）</td></tr>
+</table>
+
+<h3>MT-Bench</h3>
+<table>
+  <tr><th>属性</th><th>值</th></tr>
+  <tr><td>发布</td><td>2023</td></tr>
+  <tr><td>题数</td><td>80 道多轮对话</td></tr>
+  <tr><td>评分</td><td>LLM-as-Judge（用 GPT-4 打分）</td></tr>
+  <tr><td>格式</td><td>8 个类别 × 5 个 prompt × 2 轮对话</td></tr>
+</table>
+
+<hr>
+
+<h2>五、基准陷阱一览</h2>
+
+<table>
+  <tr><th>陷阱</th><th>说明</th><th>应对</th></tr>
+  <tr><td>📈 饱和</td><td>所有模型接近天花板，失去区分度</td><td>关注未饱和基准（SWE-bench, GPQA）</td></tr>
+  <tr><td>💉 数据污染</td><td>测试题出现在训练数据中</td><td>使用动态基准如 LiveBench</td></tr>
+  <tr><td>🎨 格式刷分</td><td>模型学会格式而非内容</td><td>交叉验证不同格式的基准</td></tr>
+  <tr><td>🏭 基准≠生产</td><td>满分不代表实际好用</td><td>建立自己的应用级评估集</td></tr>
+</table>
+
+<hr>
+
+<h2>六、前沿模型最新趋势</h2>
+
+<p>截至 2026 年中：</p>
+<ul>
+  <li><strong>知识型基准</strong>（MMLU, HellaSwag）已全面饱和，MMLU-Pro 成为新标准</li>
+  <li><strong>推理型基准</strong>（GPQA, AIME）仍有区分度，是当前战场</li>
+  <li><strong>代码型基准</strong>（SWE-bench）是增长最快的评估方向</li>
+  <li><strong>动态基准</strong>（LiveBench, HLE）正在取代静态基准成为主流</li>
+  <li><strong>Agent 评估</strong>（SWE-bench Agent, WebArena）是最新前沿</li>
+</ul>
+
+<hr>
+
+<h2>七、外部资源</h2>
+
+<ul>
+  <li><a href="https://livebench.ai/">LiveBench</a> — 每月更新，无污染</li>
+  <li><a href="https://lmarena.ai/">LMSYS Chatbot Arena</a> — 人类偏好排行</li>
+  <li><a href="https://huggingface.co/spaces/open-llm-leaderboard/open_llm_leaderboard">HF Open LLM Leaderboard</a> — 开源模型排行榜</li>
+  <li><a href="https://www.swebench.com/">SWE-bench</a> — 代码工程评估</li>
+</ul>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DPO & GRPO 速查表</title>
+<link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+<div class="container">
+
+<h1>⚡ DPO & GRPO 速查表</h1>
+<p class="meta">
+  <span class="tag tag-green">reference</span>
+  <span>阶段 4 — 偏好对齐</span>
+</p>
+
+<hr>
+
+<h2>一、DPO 核心公式</h2>
+
+<pre>
+loss = -logsigmoid( β × [ (chosen_policy - reject_policy) - (chosen_ref - reject_ref) ] )
+
+其中：
+  chosen_policy  = Σ log P_policy(chosen_token | context)    策略模型给好回答的 log 概率
+  reject_policy  = Σ log P_policy(reject_token | context)    策略模型给差回答的 log 概率
+  chosen_ref     = Σ log P_ref(chosen_token | context)       参考模型给好回答的 log 概率
+  reject_ref     = Σ log P_ref(reject_token | context)       参考模型给差回答的 log 概率
+  β              = 偏离惩罚系数（minimind 默认 0.15）
+
+关键变量：β 越大 = 越紧贴参考模型
+          β 越小 = 越可以自由偏好调整
+</pre>
+
+<h3>DPO 损失函数通俗版</h3>
+<pre>
+DPO的"隐式奖励" = (策略模型偏好的程度) - (参考模型本来就偏好的程度)
+loss  = -logsigmoid(β × 隐式奖励)
+
+当隐式奖励 > 0 → loss 小 → 策略已经学会偏好了 ✓
+当隐式奖励 < 0 → loss 大 → 策略还不如参考模型，需要继续学 ✗
+</pre>
+
+<hr>
+
+<h2>二、GRPO 核心公式</h2>
+
+<pre>
+GRPO 的关键创新：没用 Critic 模型算 baseline，而是用组内标准化
+
+Step 1: 组内标准化（代替传统 Critic）
+  advantages = (rewards - mean(rewards_in_group)) / std(rewards_in_group)
+
+Step 2: PPO-clip 目标（和 PPO 一样）
+  ratio = exp(policy_logprob - old_policy_logprob)
+  loss1 = ratio × advantage              (直接优化)
+  loss2 = clip(ratio, 1-ε, 1+ε) × advantage  (裁剪版)
+  policy_loss = -min(loss1, loss2)
+
+Step 3: KL 惩罚（防止跑偏）
+  per_token_kl = exp(ref - policy) - (ref - policy) - 1
+  不对称：概率变高惩罚 > 概率变低惩罚（鼓励谨慎）
+
+Step 4: 总 loss
+  total_loss = policy_loss + β × KL_penalty
+</pre>
+
+<hr>
+
+<h2>三、四阶段训练对比表</h2>
+
+<table>
+  <tr><th>阶段</th><th>数据</th><th>Loss</th><th>学习率</th><th>额外模型</th></tr>
+  <tr>
+    <td>Pretrain</td>
+    <td>纯文本</td>
+    <td>CrossEntropy</td>
+    <td>5e-4</td>
+    <td>无</td>
+  </tr>
+  <tr>
+    <td>SFT</td>
+    <td>对话对</td>
+    <td>CE + Loss Masking</td>
+    <td>1e-5</td>
+    <td>无</td>
+  </tr>
+  <tr>
+    <td>DPO</td>
+    <td>偏好对 (chosen &gt; reject)</td>
+    <td>-logsigmoid(β × 隐式奖励)</td>
+    <td>4e-8</td>
+    <td>参考模型（冻结）</td>
+  </tr>
+  <tr>
+    <td>GRPO</td>
+    <td>模型自生成 + 奖励评分</td>
+    <td>PPO-clip + KL 惩罚</td>
+    <td>3e-7</td>
+    <td>参考模型 + 小奖励模型</td>
+  </tr>
+</table>
+
+<hr>
+
+<h2>四、GRPO 奖励设计（minimind 示例）</h2>
+
+<table>
+  <tr><th>条件</th><th>分值</th></tr>
+  <tr><td>回答长度 20~800 字</td><td>+0.5</td></tr>
+  <tr><td>回答长度超出范围</td><td>-0.5</td></tr>
+  <tr><td>包含 &lt;think&gt; 且思考部分 20~300 字</td><td>+1.0</td></tr>
+  <tr><td>包含 &lt;think&gt; 但思考部分超范围</td><td>-0.5</td></tr>
+  <tr><td>恰好 1 个 &lt;/think&gt; 标签</td><td>+0.25</td></tr>
+  <tr><td>重复惩罚</td><td>最高 -0.5</td></tr>
+  <tr><td>奖励模型打分</td><td>任意（可正可负）</td></tr>
+</table>
+
+<hr>
+
+<h2>五、关键参数速查</h2>
+
+<table>
+  <tr><th>参数</th><th>DPO</th><th>GRPO</th></tr>
+  <tr><td>learning_rate</td><td><strong>4e-8</strong></td><td><strong>3e-7</strong></td></tr>
+  <tr><td>batch_size</td><td>4</td><td>2</td></tr>
+  <tr><td>beta (KL/偏离系数)</td><td>0.15</td><td>0.1</td></tr>
+  <tr><td>epochs</td><td>1</td><td>1</td></tr>
+  <tr><td>num_generations</td><td>—</td><td>6</td></tr>
+  <tr><td>ε (clip)</td><td>—</td><td>0.2</td></tr>
+  <tr><td>grad_clip</td><td>1.0</td><td>1.0</td></tr>
+  <tr><td>accumulation_steps</td><td>1</td><td>1</td></tr>
+</table>
+
+</div>
+</body>
+</html>

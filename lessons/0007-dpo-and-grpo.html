@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DPO 与 GRPO — 从"学偏好"到"自我进化"</title>
+<link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+<div class="container">
+
+<h1>🎯 DPO 与 GRPO</h1>
+<p class="meta">
+  <span class="tag tag-cyan">lesson 0007</span>
+  <span>阶段 4 — 后训练 · 对齐</span>
+</p>
+
+<p>
+SFT 让模型学会了"问问题要回答"，但它解决不了一个根本问题——<strong>没有人告诉模型什么样的回答更好</strong>。
+</p>
+
+<p>
+Pretrain 学的是"可能"的 token。SFT 学的是"应该"的 token。<strong>DPO/GRPO 学的是"更好"的 token</strong>。
+</p>
+
+<hr>
+
+<h2>1. 前置回顾：三阶段分工</h2>
+
+<div class="card">
+  <div class="card-title">LLM 训练的三种"信号"</div>
+  <table>
+    <tr><th>阶段</th><th>信号来源</th><th>学什么</th><th>类比</th></tr>
+    <tr><td>Pretrain</td><td>文本本身<br>（下一个 token 是哪来的？）</td><td>语言和知识</td><td>读了一辈子书<br>知道"狗有四条腿"</td></tr>
+    <tr><td>SFT</td><td>人工标注<br>（这个回答对不对？）</td><td>对话格式和行为模式</td><td>别人教你怎么回答问题<br>"别人这么问你就这么答"</td></tr>
+    <tr><td>DPO/RLHF</td><td>偏好比较<br>（回答 A 比 B 好？）</td><td>理解什么算"好"</td><td>自己对比不同回答<br>"咦，这个版本明显更好"</td></tr>
+  </table>
+</div>
+
+<p>
+关键区别在于：SFT 只能学"正确的"回答，DPO/RLHF 可以学"更好的"回答——哪怕标签数据里没有完美答案，模型也能从对比中学会辨别好坏。
+</p>
+
+<hr>
+
+<h2>2. DPO — 直接偏好优化</h2>
+
+<h3>2.1 为什么需要 DPO？</h3>
+
+<p>
+传统的 RLHF（基于强化学习的人类反馈）需要四件套：<strong>策略模型 + 参考模型 + 奖励模型 + PPO 算法</strong>。训练过程像马戏团杂耍——一边让策略模型生成回答，一边让奖励模型打分，然后用 PPO 更新策略，同时 KL 惩罚防止跑偏。复杂、不稳定、显存爆炸。
+</p>
+
+<p>
+2023 年 Stanford 提出的 <strong>DPO（Direct Preference Optimization）</strong> 发现了一个惊人的事实：<strong>奖励模型根本不需要</strong>——偏好对比本身就隐含了奖励信号。
+</p>
+
+<div class="callout tip">
+  <strong>核心洞察</strong>：RLHF 的奖励模型本质上是"给回答打分"，而偏好数据（回答 A > 回答 B）本身就是一种打分。DPO 直接把这个"隐含的打分"翻译成 loss，省掉奖励模型这个中间商。
+</div>
+
+<h3>2.2 DPO 的工作流</h3>
+
+<div class="diagram">
+准备：一个 prompt，两份回答（chosen ✓ / rejected ✗）
+↓
+Step 1：用当前策略模型计算两份回答的 log 概率
+       ↳ chosen P = 1.2（正确回答的累积概率）
+       ↳ rejected P = 0.4（错误回答的累积概率，也低！）
+Step 2：用初始参考模型（冻结）也算一遍
+Step 3：DPO loss = -logsigmoid( β × [(chosen - rejected)策略 - (chosen - rejected)参考] )
+↓
+优化目标：让策略模型 更偏爱好回答 > 参考模型原本就偏好的程度
+</div>
+
+<h3>2.3 具体数字算例</h3>
+
+<div class="card">
+  <div class="card-title">一个 Batch 的完整计算</div>
+
+  <p><strong>原始数据</strong>：</p>
+  <table>
+    <tr><th>变量</th><th>含义</th><th>数值</th></tr>
+    <tr><td>chosen_ref_logprob</td><td>参考模型给好回答的概率</td><td>-2.5</td></tr>
+    <tr><td>reject_ref_logprob</td><td>参考模型给差回答的概率</td><td>-3.8</td></tr>
+    <tr><td>chosen_policy_logprob</td><td>策略模型给好回答的概率</td><td>-2.0</td></tr>
+    <tr><td>reject_policy_logprob</td><td>策略模型给差回答的概率</td><td>-5.0</td></tr>
+    <tr><td colspan="3" style="border-top: 2px solid var(--accent);"></td></tr>
+    <tr><td>chosen_pref</td><td>= -2.0 - (-5.0) = 3.0</td><td style="color: var(--green);">策略明显偏好 chosen</td></tr>
+    <tr><td>ref_pref</td><td>= -2.5 - (-3.8) = 1.3</td><td style="color: var(--yellow);">参考模型也偏好，但幅度小</td></tr>
+    <tr><td>implicit_reward</td><td>= 3.0 - 1.3 = 1.7</td><td style="color: var(--green);">策略比参考更偏好 chosen</td></tr>
+    <tr><td>logits</td><td>= β × 1.7（β=0.15）</td><td>= 0.255</td></tr>
+    <tr><td>loss</td><td>= -logsigmoid(0.255) = -ln(0.563)</td><td>≈ 0.574 <span style="color: var(--green);">✓ 已经比较小了</span></td></tr>
+  </table>
+</div>
+
+<p><strong>如果策略模型没学会</strong>（chosen 和 rejected 的概率差不多）：</p>
+<pre><code>chosen_ref = -2.5,  reject_ref = -3.8  →  ref_pref = 1.3
+chosen_pol = -2.8,  reject_pol = -3.5  →  pol_pref = 0.7
+implicit_reward = 0.7 - 1.3 = -0.6
+logits = 0.15 × (-0.6) = -0.09
+loss  = -logsigmoid(-0.09) = -ln(0.477) ≈ 0.739  ← 更大的 loss</code></pre>
+
+<h3>2.4 β（beta）的作用</h3>
+
+<p>β 控制<strong>偏离参考模型的程度</strong>：</p>
+
+<table>
+  <tr><th>β</th><th>行为</th><th>效果</th></tr>
+  <tr><td>小（如 0.01）</td><td>惩罚弱，模型可以大胆偏离参考</td><td>学得快，但也容易忘掉原有知识</td></tr>
+  <tr><td>大（如 0.5）</td><td>惩罚强，模型必须紧贴参考</td><td>稳定，但偏好调整非常缓慢</td></tr>
+  <tr><td>minimind 默认 0.15</td><td>中等</td><td>安全平衡</td></tr>
+</table>
+
+<div class="callout warn">
+  <strong>DPO 的微妙之处</strong>：因为不需要奖励模型，DPO 在<strong>同一个 prompt 只用一对</strong>（chosen/rejected）数据时效果最好。如果一个 prompt 有多个回答要做排序，DPO 就不如传统 RLHF 灵活了。
+</div>
+
+<h3>2.5 DPO 的超低学习率</h3>
+
+<p>minimind 的 DPO 学习率 = <strong>4e-8</strong>，比 SFT（1e-5）还要再低 250 倍！</p>
+
+<table>
+  <tr><th>阶段</th><th>学习率</th><th>相对 Pretrain</th></tr>
+  <tr><td>Pretrain</td><td>5e-4</td><td>基准</td></tr>
+  <tr><td>SFT</td><td>1e-5</td><td>1/50</td></tr>
+  <tr><td>DPO</td><td>4e-8</td><td>1/12,500</td></tr>
+</table>
+
+<p>原因很简单：DPO 是在 SFT 已经调好的模型上继续调优，只需要<strong>微调概率分布的倾斜方向</strong>，动太多反而会遗忘 SFT 学到的对话能力。</p>
+
+<hr>
+
+<h2>3. GRPO — 群体相对策略优化</h2>
+
+<h3>3.1 从 DPO 到 GRPO</h3>
+
+<p>DPO 虽然简单，但有个限制：<strong>它需要别人准备好"好回答 vs 差回答"的对比数据</strong>。</p>
+
+<p>如果模型能自己生成一堆回答，自己判断哪个好，然后学习——是不是更强大？</p>
+
+<p>这就是 <strong>GRPO（Group Relative Policy Optimization）</strong>，DeepSeek-R1 使用的核心技术。</p>
+
+<h3>3.2 GRPO 独有：不需要奖励模型和评论家</h3>
+
+<p>传统 RLHF 需要两个额外模型：</p>
+<ul>
+  <li><strong>奖励模型</strong>：给回答打分</li>
+  <li><strong>评论家（Critic）</strong>：估算"这个行动值多少分"（PPO 需要的基础线）</li>
+</ul>
+
+<p>GRPO 把两个都砍掉了：</p>
+<ul>
+  <li><strong>奖励来自规则 + 小奖励模型</strong>（不是大奖励模型）</li>
+  <li><strong>基础线来自组内统计</strong>——对同一个 prompt 生成多个回答，用这组的均值/方差做标准化</li>
+</ul>
+
+<h3>3.3 GRPO 完整工作流</h3>
+
+<div class="diagram">
+┌─────────────────────────────────────────────────────┐
+│                    一次 GRPO 训练步                          │
+├─────────────────────────────────────────────────────┤
+│                                                             │
+│  Step 1: 对每个 prompt，生成 N 个回答（如 6 个）        │
+│          → N = 6 个回答，各不相同的策略                    │
+│                                                             │
+│  Step 2: 用规则 + 奖励模型打分                               │
+│          → 长度惩罚（太长太短扣分）                 │
+│          → 重复惩罚（复读机扣分）                     │
+│          → 思考格式奖励（有&lt;think&gt;...&lt;/think&gt;加分）       │
+│          → 奖励模型打分                                    │
+│          → 总分 = 规则分 + 奖励分                          │
+│                                                             │
+│  Step 3: 组内标准化（关键创新）                              │
+│          → 6 个 reward: [0.3, 0.8, -0.2, 1.1, 0.5, -0.1]  │
+│          → 均值 = 0.4, 标准差 = 0.48                       │
+│          → advantage = (reward - 0.4) / 0.48               │
+│          → 结果: [-0.21, 0.83, -1.25, 1.46, 0.21, -1.04]  │
+│                                                             │
+│  Step 4: 用 advantage 更新策略                              │
+│          → loss = -min(ratio×Adv, clipped_ratio×Adv)       │
+│          → + β × KL 惩罚（防止偏离参考太远）                │
+│                                                             │
+└─────────────────────────────────────────────────────┘
+</div>
+
+<h3>3.4 具体数字算例</h3>
+
+<div class="card">
+  <div class="card-title">组内标准化计算</div>
+  <pre><code>一个 prompt，batch_size=2，每个生成 3 个回答（num_generations=3）
+
+prompt: "请解释量子计算的基本原理"
+
+回答 1（长度 45 字，质量较好）→ 规则分 0.5 + 奖励分 0.7 = 1.2
+回答 2（长度 12 字，太短）→ 规则分 -0.5 + 奖励分 0.2 = -0.3
+回答 3（长度 200 字，过长）→ 规则分 -0.5 + 奖励分 0.8 = 0.3
+
+回答 4（长度 80 字，质量好）→ 规则分 0.5 + 奖励分 0.9 = 1.4
+回答 5（长度 150 字，重复）→ 规则分 -0.5 - 0.2 + 奖励分 0.5 = -0.2
+回答 6（长度 55 字，一般）→ 规则分 0.5 + 奖励分 0.3 = 0.8
+
+组内（6 个回答）：
+  均值 = (1.2 - 0.3 + 0.3 + 1.4 - 0.2 + 0.8) / 6 = 0.53
+  标准差 = 0.59
+
+advantages:
+  回答 1: (1.2 - 0.53) / 0.59 = 1.14   ← 高出平均，鼓励
+  回答 2: (-0.3 - 0.53) / 0.59 = -1.41  ← 低出平均，惩罚
+  回答 3: (0.3 - 0.53) / 0.59 = -0.39  ← 略低
+  回答 4: (1.4 - 0.53) / 0.59 = 1.47   ← 最高，最鼓励
+  回答 5: (-0.2 - 0.53) / 0.59 = -1.24  ← 惩罚
+  回答 6: (0.8 - 0.53) / 0.59 = 0.46   ← 略高，一点点鼓励</code></pre>
+</div>
+
+<h3>3.5 DPO vs GRPO 对比</h3>
+
+<table>
+  <tr><th>维度</th><th>DPO</th><th>GRPO</th></tr>
+  <tr><td>数据来源</td><td>外部标注的偏好对</td><td>模型自己生成 + 评分</td></tr>
+  <tr><td>额外模型</td><td>参考模型（冻结）</td><td>参考模型 + 奖励模型（小）</td></tr>
+  <tr><td>奖励信号</td><td>隐式（来自偏好对比）</td><td>显式（规则 + 模型打分）</td></tr>
+  <tr><td>标准化方式</td><td>与参考模型做差</td><td>组内 Z-score</td></tr>
+  <tr><td>能否动态探索</td><td>❌ 不能</td><td>✅ 每次生成不同回答</td></tr>
+  <tr><td>训练稳定性</td><td>高（简单）</td><td>中（需要调参）</td></tr>
+  <tr><td>代表模型</td><td>Llama 2, Mistral</td><td>DeepSeek-R1, Qwen 3</td></tr>
+  <tr><td>学习率</td><td>4e-8（极低）</td><td>3e-7（相对较高）</td></tr>
+</table>
+
+<h3>3.6 KL 惩罚的作用</h3>
+
+<p>GRPO 的 loss 公式里有一个重要的 KL 惩罚项：<code>β × per_token_kl</code></p>
+
+<p>这个惩罚用了一个<strong>近似公式</strong>：</p>
+<pre><code>per_token_kl = exp(ref_logprob - policy_logprob) - (ref_logprob - policy_logprob) - 1
+
+当 policy_logprob = ref_logprob（没有偏离）→  → per_token_kl = exp(0) - 0 - 1 = 0
+当 policy_logprob 比 ref 大 1 个点 →  → per_token_kl = exp(1) - 1 - 1 = 0.718
+当 policy_logprob 比 ref 小 1 个点 →  → per_token_kl = exp(-1) - (-1) - 1 = 0.368
+</code></pre>
+
+<p>为什么 Policy 预测概率变高比变低惩罚更大？</p>
+<ul>
+  <li>如果策略模型<strong>特别自信</strong>（概率远高于参考），说明它在偏离原始模型——这是有风险的</li>
+  <li>如果策略模型<strong>不那么自信</strong>（概率低于参考），说明它在退缩——这没什么大问题</li>
+  <li>不对称惩罚：鼓励谨慎，惩罚冒进</li>
+</ul>
+
+<hr>
+
+<h2>4. 从 Pretrain 到 GRPO 的完整训练流程</h2>
+
+<div class="card">
+  <div class="card-title">minimind 训练管线</div>
+  <pre><code>原始数据
+    │
+    ▼
+Pretrain（全量文本）→ 基座模型
+    │                   base model
+    ▼
+SFT（对话数据）    → SFT 模型
+    │                   sft model
+    ▼
+DPO（偏好对）      → DPO 模型
+    │                   dpo model
+    ▼
+GRPO（自我探索）   → 最终模型
+                        grpo model</code></pre>
+</div>
+
+<p>每一步都在前一步的基础上，逐步提升模型的"品质"：</p>
+<ul>
+  <li><strong>Pretrain</strong>：会说话、有知识</li>
+  <li><strong>SFT</strong>：会对话、知道别人问问题要回答</li>
+  <li><strong>DPO</strong>：知道哪些回答是更好的</li>
+  <li><strong>GRPO</strong>：会自己探索、自我迭代</li>
+</ul>
+
+<hr>
+
+<h2>5. 推荐阅读</h2>
+
+<ul>
+  <li><strong>DPO 原始论文</strong>：<a href="https://arxiv.org/abs/2305.18290">Direct Preference Optimization: Your Language Model is Secretly a Reward Model</a>（Rafailov et al., 2023）</li>
+  <li><strong>GRPO 论文</strong>：<a href="https://arxiv.org/abs/2501.12948">DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning</a>（DeepSeek, 2025）</li>
+  <li><strong>minimind 源码</strong>：<code>trainer/train_dpo.py</code> + <code>trainer/train_grpo.py</code></li>
+</ul>
+
+<hr>
+
+<p class="nav-links">
+  ← <a href="0006-sft-and-lora.html">上一课：SFT 与 LoRA</a> ·
+  <a href="../reference/dpo-grpo.html">参考：DPO & GRPO 速查表 →</a>
+</p>
+
+<p class="sidenote">
+  有不明白的地方？随时问 Fairy！可以继续深挖具体原理，或者用具体的数值例子帮你演算一遍。
+</p>
+
+</div>
+</body>
+</html>

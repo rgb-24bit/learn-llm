@@ -21,9 +21,10 @@
 - ✅ 阶段0（前置基础）：训练流程、Tokenizer、Embedding、权重绑定、RoPE、NTK/YaRN
 - ✅ 阶段2（注意力机制）：Attention 代码逐行解读、多头注意力的分工与实现
 - ✅ 阶段3（GPT 模型架构）：Block 结构 ✓ | KV Cache ✓ | 图片/视频 Token 化 ✓ | 图文对齐/多模态训练 ✓ | Pretrain 训练循环 ✓
+- ✅ 阶段4（后训练）：SFT & LoRA ✓ | DPO & GRPO ✓
 
 进行中：
-- 🔄 阶段4（后训练）：SFT & LoRA ✓ | DPO/GRPO 待学
+- 🔄 阶段5（评估与数据）：LLM 基准全景 ✓ | MMLU 深度解读 | GSM8K 推理评估 | HumanEval | 数据配比 | Chatbot Arena
 
 ## 参考资料源
 

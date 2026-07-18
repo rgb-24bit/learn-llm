@@ -43,6 +43,32 @@
 | DeepSeek-R1 (2025) | GRPO + Reasoning | ⭐⭐⭐ |
 | Llama 2: Open Foundation and Fine-Tuned Chat Models (2023) | SFT + RLHF | ⭐⭐ |
 
+## 评估基准（阶段 5）
+
+### MMLU
+- **论文**: https://arxiv.org/abs/2009.03300 — Hendrycks et al., 2020
+- **核心**: 15,908 道四选一，57 学科，5-shot
+- **特点**: 随机基线 25%，人类 ~89%，前沿 ~93%
+
+### GSM8K
+- **论文**: https://arxiv.org/abs/2110.14168 — Cobbe et al., 2021
+- **核心**: 8,500 道小学数学应用题，2–8 步推理
+- **特点**: 推动了 Chain-of-Thought 技术，前沿已达 99%
+
+### HumanEval
+- **论文**: https://arxiv.org/abs/2107.03374 — Chen et al., 2021
+- **核心**: 164 道 Python 函数题，pass@k 评分
+- **特点**: 前沿已达 90%+，不反映真实工程能力
+
+### SWE-bench
+- **论文**: https://arxiv.org/abs/2310.06770 — Jimenez et al., 2024
+- **核心**: 2,294 道真实 GitHub Issue 修复
+- **特点**: 至今无人满分，当前最难代码基准
+
+### Chatbot Arena
+- **地址**: https://lmarena.ai/
+- **核心**: 匿名对战 + 人类投票 + Elo 评分
+
 ## 视觉/多模态
 
 ### ViT — Vision Transformer (2021)
