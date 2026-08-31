@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>采样与温度 — 为什么相同输入输出不同？</title>
+<link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+<div class="container">
+
+<h1>🎲 采样与温度</h1>
+<p class="meta">
+  <span class="tag tag-blue">lesson 0010</span>
+  <span>阶段 5 — 推理侧 · 解码机制</span>
+</p>
+
+<div class="callout info">
+<p>
+上一课我们跟到"模型输出一个概率分布"就停了。这一课回答一个你一定会遇到的问题：
+<b>同样的输入，为什么每次回答都不一样？</b>答案是：模型只负责发彩票，选词靠抽签。
+</p>
+</div>
+
+<h2>一、模型只输出概率，选词靠掷骰子</h2>
+
+<p>模型算完"今天天气"后，对下一个词给出的不是答案，而是一排<b>概率</b>：</p>
+
+<div class="card">
+  <div class="card-title">模型内部的"彩票机"</div>
+  <pre><code>下一个词    概率
+好        0.35  ← 35% 的票
+晴        0.25  ← 25% 的票
+不错      0.15
+很棒      0.10
+其他词    0.15</code></pre>
+</div>
+
+<p>
+把模型想象成一台<b>偏心彩票机</b>：35% 的票写着"好"，25% 写着"晴"……
+模型从不直接挑词，它只宣布"我的机器长这个样子"。
+真正决定下一个词的是<b>掷骰子（按概率抽签）</b>。
+</p>
+
+<p>
+两次调用相同输入 = 摇两次同一枚偏心骰子。第一次摇出"好"，第二次摇出"晴"，
+都完全正常——这不是 bug，而是设计：因为语言里"正确的下一个词"往往不止一个。
+</p>
+
+<h2>二、三个旋钮：温度 / top_k / top_p</h2>
+
+<table>
+<tr><th>旋钮</th><th>做什么</th><th>类比</th></tr>
+<tr><td><b>temperature</b></td><td>先除以 T 再算概率：T&lt;1 尖峰更尖（更确定），T&gt;1 更平（更随机）</td><td>骰子偏心度</td></tr>
+<tr><td><b>top_k</b></td><td>只保留最大的前 K 个词，其余出局</td><td>只让前 50 名抽签</td></tr>
+<tr><td><b>top_p</b></td><td>从概率最大的词开始累加，加到 p 就截断</td><td>累计份额 85% 的"大户"在场</td></tr>
+</table>
+
+<div class="card">
+  <div class="card-title">数值算例：同一句话，同一组原始分数</div>
+  <p>原始分数（logits）：好=2.0，晴=1.5，不错=0.8，很棒=0.5</p>
+  <pre><code>温度 0.5（冷） → 好 ≈ 66%   几乎雷打不动
+温度 1.5（热） → 好 ≈ 39%   四处都有机会</code></pre>
+  <p>这就是"冷热"命名来源：温度低，分布被冻成尖峰；温度高，摊平了。</p>
+</div>
+
+<div class="callout tip">
+<p><b>实际调用顺序</b>：logits ÷ 温度 → top_k 过滤 → top_p 截断 → 归一化成概率 → 掷骰子（采样）。<br>
+如果<b>全撤掉</b>（贪心模式 / temperature=0 / 不采样），输出就完全确定了——但容易走上最短最俗的路径，翻来覆去几句套话。保留一点随机，正是聊天产品愿意做的取舍。</p>
+</div>
+
+<h2>三、DeepSeek 特例：温度真的不生效？</h2>
+
+<div class="callout warn">
+<p>
+你观察得完全正确。DeepSeek 官方文档（2026 年 8 月版）白纸黑字写着：
+<b>「思考模式不支持 temperature、top_p、presence_penalty、frequency_penalty 参数。
+为了兼容已有软件，设置参数不会报错，但也不会生效。」</b>
+</p>
+</div>
+
+<p>背后的设计是：</p>
+<table>
+<tr><th>模式</th><th>采样旋钮</th><th>真正的控制手段</th></tr>
+<tr><td><b>思考模式</b>（V4 默认开启）</td><td>温度 / top_p 全部被<b>拔线</b></td><td><b>reasoning_effort</b>：low / high / max（控制"想多深"）</td></tr>
+<tr><td><b>非思考模式</b></td><td>温度 / top_p 正常生效</td><td>普通采样配置</td></tr>
+</table>
+
+<div class="callout info">
+<p>
+<b>为什么这么设计？</b>思考模式下模型先输出一大段思维链再回答。让用户调温度，
+会同时干扰"思考"与"回答"两段生成；而用户想要"更确定"时，真正有用的旋钮往往是
+"多想一想"而不是"采样更保守"。于是 DeepSeek 干脆把采样参数在思考模式下禁用，
+换上了思考强度旋钮。
+</p>
+<p>
+<b>推论</b>：在 DeepSeek 上点"重新生成"时，答案差异主要来自<b>思维链本身的随机性</b>，
+而不是温度。想验证：同参数连调几次，对比思考内容与最终答案。
+</p>
+</div>
+
+<div class="callout danger">
+<p><b>⚠ 其他已弃用参数</b>：frequency_penalty、presence_penalty 在 DeepSeek API 中已标记 deprecated，传入也不会产生任何效果。</p>
+</div>
+
+<h2>四、一行总结</h2>
+
+<div class="card">
+<div class="card-title">答案</div>
+<p>
+相同输入得到不同输出，不是模型出错，而是"下一个词"被故意设计成<b>按概率抽签</b>——
+偏心程度由 temperature / top_k / top_p 控制；而 DeepSeek 思考模式把这些旋钮<b>拔了线</b>，
+换了"思考强度"旋钮（reasoning_effort）。
+</p>
+</div>
+
+<p class="meta">
+  <span class="tag tag-green">来源</span>
+  minimind generate 源码 · DeepSeek 官方 API 文档（2026-08-31 抓取）
+</p>
+
+</div>
+</body>
+</html>

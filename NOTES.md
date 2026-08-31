@@ -35,6 +35,8 @@
 - ✅ **SFT 与 LoRA**：Loss masking、Full SFT vs LoRA 对比、低秩分解原理
 - ✅ **SFT 深层机制**：Pretrain（可能的token）→ SFT（应该的token）→ DPO（更好的token），三个层面的生效方式（Attention指令识别、FFN知识路由、概率压低错误项），SFT不改变知识只改变使用方式
 - ✅ **Scaling Law**：PPL ∝ N^(-0.076)，Chinchilla 1:20 法则，边际递减
+- ✅ **解码采样与温度**：模型只输出概率分布，选词靠多项式采样（掷偏心骰子）；temperature/top_k/top_p 三个旋钮的机制与顺序；贪心 vs 采样取舍
+- ✅ **DeepSeek 特例**：思考模式（V4 默认开启）不支持 temperature/top_p/penalties（官方确认，传入不生效），真正旋钮是 reasoning_effort（low/high/max）；frequency/presence penalty 已 deprecated
 
 ### 待学（按优先级）
 1. ✅ LLM 基准全景（MMLU/GSM8K/HumanEval/SWE-bench/Chatbot Arena）
