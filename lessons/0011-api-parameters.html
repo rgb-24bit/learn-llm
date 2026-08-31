@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM API 参数全景 — 一次调用里每个旋钮是干嘛的</title>
+<link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+<div class="container">
+
+<h1>🎛️ LLM API 参数全景</h1>
+<p class="meta">
+  <span class="tag tag-blue">lesson 0011</span>
+  <span>阶段 5 — 应用侧 · 一次调用的完整面板</span>
+</p>
+
+<div class="callout info">
+<p>
+前面学了"怎么想"（采样/温度），这课把一张 API 请求里<b>所有常用参数</b>串成全景：
+<b>管怎么想、管怎么输出、管怎么干活</b>，外加一两个不注意就踩坑的工程细节。
+</p>
+</div>
+
+<h2>一、生成旋钮：决定"每个词怎么选"</h2>
+
+<table>
+<tr><th>参数</th><th>含义</th><th>默认</th><th>备注</th></tr>
+<tr><td><b>temperature</b></td><td>采样温度（偏心骰子）</td><td>1.0</td><td>思考模式<b>不生效</b>（见 lesson 0010）</td></tr>
+<tr><td><b>top_p</b></td><td>累计概率阈值，砍长尾</td><td>1.0</td><td>与温度建议只调一个</td></tr>
+<tr><td><b>top_k</b></td><td>只保留前 K 个词</td><td>视实现</td><td>托管大模型 API 少见</td></tr>
+<tr><td><b>max_tokens</b></td><td>回答最大长度</td><td>视模型</td><td>⚠️ 思考链 token <b>也算额度</b></td></tr>
+</table>
+
+<div class="callout danger">
+<p><b>实测踩坑</b>：思考模式下 max_tokens=300 → 思考内容（约 882 字符）把额度吃光，
+最终答案 <b>content 为空</b>。教训：思考模式下把 max_tokens 拉高（≥4096），
+否则你以为模型没回答，其实它把额度全花在"想"上了。</p>
+</div>
+
+<h2>二、惩罚三兄弟：防"复读机"</h2>
+
+<table>
+<tr><th>参数</th><th>机制</th><th>DeepSeek 状态</th></tr>
+<tr><td><b>frequency_penalty</b></td><td>按词<b>出现次数</b>惩罚，越重复越压低</td><td>❌ deprecated（无效）</td></tr>
+<tr><td><b>presence_penalty</b></td><td>按词<b>是否出现过</b>惩罚，鼓励新词</td><td>❌ deprecated（无效）</td></tr>
+<tr><td><b>repetition_penalty</b></td><td>更强的重复惩罚</td><td>本地推理常用，托管少见</td></tr>
+</table>
+
+<p>区别一句话：frequency 看"你说了几遍"，presence 看"你说没说过"。</p>
+
+<h2>三、输出控制：决定"长什么样"</h2>
+
+<table>
+<tr><th>参数</th><th>作用</th></tr>
+<tr><td><b>stop</b></td><td>遇到指定序列就停下（如 ``` 或分隔符）</td></tr>
+<tr><td><b>response_format</b></td><td>强制输出格式（json_object / json_schema）</td></tr>
+<tr><td><b>stream</b></td><td>流式输出：打字机式逐字返回，默认 false 全量等待</td></tr>
+</table>
+
+<h2>四、思考与工具：决定"怎么干活"</h2>
+
+<table>
+<tr><th>参数</th><th>作用</th><th>备注</th></tr>
+<tr><td><b>thinking</b></td><td>思考模式开关</td><td>V4 默认 enabled</td></tr>
+<tr><td><b>reasoning_effort</b></td><td>思考强度：low / high / max</td><td>默认 high；medium、xhigh 映射为 high</td></tr>
+<tr><td><b>tools / tool_choice</b></td><td>工具清单 + 使用策略</td><td>auto / required / none</td></tr>
+<tr><td><b>logprobs</b></td><td>返回每个词的对数概率</td><td>诊断"模型为什么这么想"</td></tr>
+</table>
+
+<h2>五、工程细节：不看会吃亏</h2>
+
+<table>
+<tr><th>参数</th><th>作用</th><th>注意</th></tr>
+<tr><td><b>messages / system</b></td><td>上下文 + 角色设定</td><td>system 是"你是谁"</td></tr>
+<tr><td><b>user_id</b></td><td>标识用户身份</td><td>用于 <b>KV Cache 隔离</b>：用户间缓存不串</td></tr>
+<tr><td><b>seed</b></td><td>固定随机种子，可复现</td><td>⚠️ DeepSeek 不提供</td></tr>
+</table>
+
+<h2>六、一次完整调用长什么样</h2>
+
+<div class="card">
+<div class="card-title">示例（DeepSeek 实测结构）</div>
+<pre><code>model:        deepseek-v4-flash
+messages:     [system=你是Fairy, user=给主人讲历史]
+thinking:     enabled + reasoning_effort=high
+max_tokens:   4096    ← 思考模式必须拉高
+temperature:  1.0     ← 思考模式下传了也不生效
+stream:       true</code></pre>
+</div>
+
+<h2>七、一行总结</h2>
+
+<div class="card">
+<div class="card-title">答案</div>
+<p>
+参数面板 = <b>生成旋钮</b>（温度/top_p/长度）+ <b>输出格式</b>（stop/format/stream）+
+<b>干活能力</b>（tools/思考强度）+ <b>运维细节</b>（user_id/seed）；
+改哪一个，取决于你想要模型<b>更随性、更准确、还是更听话</b>。
+</p>
+</div>
+
+<p class="meta">
+  <span class="tag tag-green">来源</span>
+  DeepSeek 官方 API 文档 create-chat-completion（2026-08-31 抓取）+ 实测踩坑记录
+</p>
+
+</div>
+</body>
+</html>

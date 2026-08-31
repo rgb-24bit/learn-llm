@@ -37,6 +37,7 @@
 - ✅ **Scaling Law**：PPL ∝ N^(-0.076)，Chinchilla 1:20 法则，边际递减
 - ✅ **解码采样与温度**：模型只输出概率分布，选词靠多项式采样（掷偏心骰子）；temperature/top_k/top_p 三个旋钮的机制与顺序；贪心 vs 采样取舍
 - ✅ **DeepSeek 特例**：思考模式（V4 默认开启）不支持 temperature/top_p/penalties（官方确认，传入不生效），真正旋钮是 reasoning_effort（low/high/max）；frequency/presence penalty 已 deprecated
+- ✅ **API 参数全景**：五大组（生成旋钮/惩罚三兄弟/输出控制/思考与工具/工程细节）；注意 max_tokens 含思考链额度（实测 300 被思考吃光→content 空）；user_id 用于 KV Cache 隔离；DeepSeek 无 seed
 
 ### 待学（按优先级）
 1. ✅ LLM 基准全景（MMLU/GSM8K/HumanEval/SWE-bench/Chatbot Arena）
