@@ -38,6 +38,7 @@
 - ✅ **解码采样与温度**：模型只输出概率分布，选词靠多项式采样（掷偏心骰子）；temperature/top_k/top_p 三个旋钮的机制与顺序；贪心 vs 采样取舍
 - ✅ **DeepSeek 特例**：思考模式（V4 默认开启）不支持 temperature/top_p/penalties（官方确认，传入不生效），真正旋钮是 reasoning_effort（low/high/max）；frequency/presence penalty 已 deprecated
 - ✅ **API 参数全景**：五大组（生成旋钮/惩罚三兄弟/输出控制/思考与工具/工程细节）；注意 max_tokens 含思考链额度（实测 300 被思考吃光→content 空）；user_id 用于 KV Cache 隔离；DeepSeek 无 seed
+- ✅ **视觉记忆专题**（跨领域对照）：人类三档（图标~0.3s / 短时 3~4 件 / 长期 1 万张认对 83%）靠"重绘"会失真；AI 三层（权重 / 上下文+KV Cache / 外部长期）看图为真、存画面刚起步（MemLens 基准、EVM、MemOCR）
 
 ### 待学（按优先级）
 1. ✅ LLM 基准全景（MMLU/GSM8K/HumanEval/SWE-bench/Chatbot Arena）

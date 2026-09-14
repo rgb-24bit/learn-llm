@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>人类 vs AI 的视觉记忆 — 大脑重绘，模型检索</title>
+<link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+<div class="container">
+
+<h1>🧠 人类 vs AI 的视觉记忆</h1>
+<p class="meta">
+  <span class="tag tag-blue">lesson 0012</span>
+  <span class="tag tag-cyan">专题 · 跨领域对照</span>
+  <span>认知科学 × LLM 机制</span>
+</p>
+
+<div class="callout info">
+<p>主人问："人类的记忆能记视觉吗？AI 的记忆能记视觉吗？"
+简短的回答：<strong>都能，但存法完全不同</strong>——人类靠"压缩 + 重绘"，AI 过去只会"看图写小作文"，最近才开始学着"把画面本身存起来"。</p>
+</div>
+
+<h2>一、人类：三档记忆，靠"重绘"</h2>
+
+<table>
+<tr><th>档位</th><th>时长 / 容量</th><th>类比</th></tr>
+<tr><td><b>图标记忆</b>（瞬时）</td><td>约 0.3 秒</td><td>闭眼后残留的余像</td></tr>
+<tr><td><b>视觉短时记忆</b></td><td>同时 3~4 件简单物体</td><td>脑内小白板：几秒不复习就擦掉</td></tr>
+<tr><td><b>视觉长期记忆</b></td><td>近乎"无限"：1 万张图认对 83%</td><td>相册——但存进去的不是"底片"</td></tr>
+</table>
+
+<div class="callout tip">
+<p><b>经典实验（Standing 1973）</b>：给被试看 10,000 张照片、每张只看几秒；之后二选一测试仍能认对 <b>83%</b>（约 6,600 张）。换成单词，成绩就差得多——这就是"图优于字"效应。后续研究（Brady 2008）把<b>相近的同类物体</b>放在一起考，仍有 88%：说明记住的不只是"大意"，还有可分辨的细节。</p>
+</div>
+
+<p><b>关键机制</b>：大脑<strong>不存像素</strong>。它把画面压缩成"特征 + 意义"（轮廓、颜色、情绪、这是啥），回忆时按这些线索<strong>重新画一遍</strong>。所以记忆会失真、会被暗示污染（目击证词为什么不可靠，就是这个道理）。</p>
+
+<div class="callout warn">
+<p>一行：人类记视觉 = <b>高压缩重绘</b> —— 记得多、糊得快、容易被带偏。</p>
+</div>
+
+<h2>二、AI：三层"记忆"，各会点什么</h2>
+
+<table>
+<tr><th>层</th><th>类比</th><th>能记视觉吗</th></tr>
+<tr><td><b>权重</b>（参数里）</td><td>画家的手艺</td><td>认得"猫长什么样"、也能画；但记不住"你上周发的那张图"</td></tr>
+<tr><td><b>上下文 / KV Cache</b></td><td>桌上摊开的材料</td><td>对话内能"看图答题"（图被切成几百个视觉 token）；关窗口 / 超长就没了</td></tr>
+<tr><td><b>外部长期记忆</b></td><td>档案柜 + 检索员</td><td>过去：图转文字再存（丢细节）；现在：开始直接存视觉</td></tr>
+</table>
+
+<h2>三、2026：真"视觉记忆"刚出现</h2>
+
+<div class="card">
+<div class="card-title">📚 多模态长期记忆基准：MemLens（arXiv 2605.14906）</div>
+<p>跨会话、多图对话的记忆测试。把证据图片抽掉后，主流模型的准确率掉到 <b>2% 以下</b>（80.4% 的题都依赖图）——说明这类记忆真的在"靠画面"支撑。</p>
+</div>
+
+<div class="card">
+<div class="card-title">🗂️ 情景视觉记忆 EVM（arXiv 2607.08497）</div>
+<p>图不进对话上下文，而是外部存"<b>描述 + 标签 + 缩略图</b>"；需要时再检索调回眼前。像档案管理员：不把画挂满办公室，而是编好目录随时取。</p>
+</div>
+
+<div class="card">
+<div class="card-title">🖼️ 反向操作：MemOCR（arXiv 2601.21468）</div>
+<p>把记忆<b>渲染成一张图</b>来存——利用"图比文字省 token"，还按重要程度调整字号大小（自适应信息密度）。</p>
+</div>
+
+<div class="callout danger">
+<p><b>安全视角</b>：攻击研究（LUCID，arXiv 2607.15657）能用"图片投毒"污染这类跨会话视觉记忆——侧面说明：视觉长期记忆已经真的部署在用了。</p>
+</div>
+
+<p class="sidenote">产品侧现状：ChatGPT 的"记忆"以文字条目为主；普通对话里上传的图不自动跨对话保留，要靠 Projects（项目）当文件夹持久化。</p>
+
+<h2>四、对照总表</h2>
+
+<table>
+<tr><th>维度</th><th>人类</th><th>现在的 AI</th></tr>
+<tr><td>短时视觉</td><td>残影 0.3 秒 + 同时 3~4 件</td><td>对话内图片 token；关窗即忘</td></tr>
+<tr><td>长期视觉</td><td>1 万张认对 8 成，靠重绘（会失真）</td><td>权重里会"认 / 画"；精确回忆靠检索</td></tr>
+<tr><td>存法</td><td>压缩成概念，回忆时重画</td><td>文字转述（丢细节）或视觉向量 / 缩略图</td></tr>
+<tr><td>特点</td><td>记得多、糊得快、易被暗示</td><td>检索准、理解浅、不会主动"想起来"</td></tr>
+<tr><td>遗忘</td><td>遗忘曲线，需要复习</td><td>不主动遗忘（除非删数据）；记什么由预算决定</td></tr>
+</table>
+
+<h2>五、一行总结</h2>
+
+<div class="card">
+<div class="card-title">答案</div>
+<p>人类是"<b>压缩 + 重绘</b>"的画家——记得多但会失真；AI 过去只会"看图写小作文"，现在刚开始当"<b>存画的档案员</b>"——离像人一样主动回想画面细节，还差得远。</p>
+</div>
+
+<div class="nav-links">
+<p>⬅️ 上一课：<a href="0011-api-parameters.html">LLM API 参数全景</a></p>
+<p>🔗 相关：<a href="0003-image-video-tokenization.html">图片 / 视频 Token 化</a> · <a href="0004-multimodal-training.html">多模态训练（CLIP / LLaVA）</a> · <a href="0001-kv-cache.html">KV Cache</a></p>
+</div>
+
+<p class="meta">
+  <span class="tag tag-green">来源</span>
+  Standing 1973 · Brady 2008 · Luck &amp; Vogel 1997 · Sperling 1960（复现 2023）· arXiv 2605.14906 / 2607.08497 / 2601.21468 / 2607.15657 · OpenAI Help（2026-09-14 整理）
+</p>
+
+</div>
+</body>
+</html>
