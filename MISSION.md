@@ -25,7 +25,7 @@
 
 进行中：
 - 🔄 阶段5（评估与数据）：LLM 基准全景 ✓ | 训练数据来源与优化 ✓ | MMLU 深度解读 | GSM8K 推理评估 | HumanEval | 数据配比 | Chatbot Arena
-- 📌 专题线（穿插）：人类 vs AI 的视觉记忆 ✓（2026-09-14，跨领域对照；延伸候选：Agent 记忆架构、RAG vs Memory）
+- 📌 专题线（穿插）：人类 vs AI 的视觉记忆 ✓（2026-09-14，跨领域对照）｜ Jev/Laya 决策模型 ✓（2026-09-22，热点架构：System One vs LLM 分工；延伸候选：Agent 记忆架构、RAG vs Memory、概率校准如何训练）
 
 ## 参考资料源
 
