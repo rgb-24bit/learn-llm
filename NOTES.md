@@ -40,6 +40,7 @@
 - ✅ **API 参数全景**：五大组（生成旋钮/惩罚三兄弟/输出控制/思考与工具/工程细节）；注意 max_tokens 含思考链额度（实测 300 被思考吃光→content 空）；user_id 用于 KV Cache 隔离；DeepSeek 无 seed
 - ✅ **视觉记忆专题**（跨领域对照）：人类三档（图标~0.3s / 短时 3~4 件 / 长期 1 万张认对 83%）靠"重绘"会失真；AI 三层（权重 / 上下文+KV Cache / 外部长期）看图为真、存画面刚起步（MemLens 基准、EVM、MemOCR）
 - ✅ **专题：Jev/Laya 决策模型**（2026-09-22 热点）：不写字的 System One 模型——choice/score/noul 三原语 + 校准概率；非自回归一次前向 vs 逐 token；RLCD vs RLHF；「零幻觉」= 输出结构受限 ≠ 判断正确
+- ✅ **Laya 架构拆解**（2026-09-22 深挖）：三件套=双向编码器(ModernBERT-large 421M)+决策头(2层+选项标记打分器)+Router；[MASK] 选项标记→softmax；RLCD=真评分规则+REINFORCE(GRPO式)；温度校准 ECE 0.466→0.081；边界：选项预算/零样本≈随机
 
 ### 待学（按优先级）
 1. ✅ LLM 基准全景（MMLU/GSM8K/HumanEval/SWE-bench/Chatbot Arena）

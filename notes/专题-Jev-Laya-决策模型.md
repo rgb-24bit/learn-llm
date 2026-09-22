@@ -94,6 +94,37 @@
 
 LLM 是会写字的文科生（System 2），Jev/Laya 是只举牌不解释的裁判（System 1）——不是替代，是**分工**；这轮新闻的真正信号不是"谁快 193 倍"，而是 **AI 应用开始分层**：该动脑的动脑，该反射的反射，让概率自己说话。
 
+## 九、深挖：Laya 架构拆解（2026-09-22 补充）
+
+### 三件套
+1. **双向编码器**（底座）：英文版 ModernBERT-large（395M，双向、无因果 mask）；多语版 mmBERT-base（322M，22 层，256k 词表，1024 上下文可扩 8k）
+2. **决策头**（从零训练）：2 层 transformer + 选项标记打分器（option-marker scorer）+ 行动/上报头（act/escalate）；合计 421M（英文版）
+3. **Router**：纯 Python 字符集/语言检测（<0.5ms），**推理前**决定走哪个 checkpoint
+
+### 答题机制：选项标记（Option Markers）
+- 一次请求拼成"一张考卷"：状态文本 + 问题（instructions + criteria）+ **每个选项挂一个 [MASK] 打分位**
+- **一次前向**读完整张卷子 → 各 [MASK] 位读出分数（logit）→ 同一题内选项 softmax → 概率分布
+- choice → 选项概率（billing 0.94）；score → 期望分（1.84/2.0）+ 分布；noul → P(真)（0.892）
+- 关键设计：**选项空间是请求时定义的（request time）**，不是训练时固定类别 → 换 schema/加选项**不用重训**（传统分类器做不到）
+- 预算分割（context bifurcation）：选项预算 head_max_len（英 192 / 多语 256）+ 状态预算（512−192=320 / 1024−256=768）
+
+### 训练：RLCD = 严格真评分规则 + REINFORCE
+- 策略输出分布；探索 = logits 上加零均值高斯噪声；奖励 = **严格真评分规则**（log 分 + 球面分；ordinal 题另加等级概率分 RPS）
+- 真评分规则（proper scoring rule）的意义：**只有报告真实后验概率，期望奖励才最大**——虚高/过度保守都亏（赌局结算类比）→ "说 90% 就是 90%"是奖励函数设计的直接后果
+- 更新：REINFORCE + 组均值基线（**GRPO 式**，与 lesson 0007 同源）；多轮对话 TD(λ=1.0) 前缀切片
+
+### 校准与路由
+- 出厂过度自信；按（题型 × 选项数）拟合温度 → 平均 ECE：0.466 → **0.081**（多语 0.314 → 0.106；同表 Jev 0.246）
+- 路由必须在推理前做：英文模型看高棉语 = **准确率 0.000 / 置信度 0.952**（"自信地全错"，置信度闸门救不了）→ 纯字符集检测 <0.5ms
+
+### 性能与边界（自报口径；Jev 数字为第三方公布）
+- 速度（T4）：1 题 39.5ms（英）/ 32.8ms（多语）；10 题批量 7.2ms/题；50 题 337ms；Jev p50 236–276ms → 约 7.8x
+- 质量：typed-decisions 0.766 vs Jev 0.727；AG News 0.950 vs 0.910；DAIR Emotion 0.595 vs 0.480
+- 弱点：①选项预算——77 选项 ≈ 每项 3~4 token → Banking77 0.425 vs 0.870（解法：调大预算或粗筛→精选两级）；②零样本≈随机（0.362 vs 随机 0.318 / 多数类 0.461），实力靠微调；③打分题（score）最弱（SST-5 0.372）；④根仓库仅英文
+- 生态：Apache 2.0；HF 已有 18 个微调 + 16 个量化；社区 ONNX 版（receptron，可脱离 PyTorch/JS 环境跑）；HF Space 演示
+
+详见 lesson 0014。
+
 ## 参考
 
 - TypeSafe 发布博客（2026-09-15）: typesafe.ai/blog/introducing-system-one-models-and-jev
@@ -105,3 +136,5 @@ LLM 是会写字的文科生（System 2），Jev/Laya 是只举牌不解释的�
 - Hacker News: Show HN — VisionLaya（社区给 Laya 加视觉）
 - arXiv:2503.23303（Laya 作者 2025-03 的早期工作）
 - 星途科讯 / ZAKER: 开源模型 Laya 发布：推理速度快 Jev 近 8 倍（2026-09）
+- HuggingFace 模型卡：convaiinnovations/laya（架构 / 训练 / 基准细节，含"Honest Limits"）
+- GitHub: NandhaKishorM/laya · PyPI: laya · AI工具集: Laya 中文拆解（2026-09）

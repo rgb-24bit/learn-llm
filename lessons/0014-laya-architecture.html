@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Laya 架构拆解 — 一台 33 毫秒的答题机</title>
+<link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+<div class="container">
+
+<h1>🔬 Laya 架构拆解：一台 33 毫秒的答题机</h1>
+<p class="meta">
+  <span class="tag tag-blue">lesson 0014</span>
+  <span class="tag tag-cyan">专题 · 架构深挖</span>
+  <span>承接 lesson 0013</span>
+</p>
+
+<div class="callout info">
+<p>主人追问："从 Laya 看起，架构是什么？"——Jev 闭源，Laya 是 Apache 2.0 全开源的那个，所以能真拆到骨头。一句话总览：<b>双向编码器 + 决策头 + 路由器</b> 三件套，没有解码循环，没有生成。</p>
+</div>
+
+<h2>一、三件套总览</h2>
+
+<table>
+<tr><th>部件</th><th>是什么</th><th>参数</th></tr>
+<tr><td><b>双向编码器</b>（底座）</td><td>ModernBERT-large（英文）/ mmBERT-base（多语）——双向，无因果 mask，前后文互见</td><td>395M / 322M</td></tr>
+<tr><td><b>决策头</b>（从零训练）</td><td>2 层 transformer + 选项标记打分器 + 行动/上报头（act/escalate）</td><td>约 26M（总 421M）</td></tr>
+<tr><td><b>Router</b></td><td>纯 Python 字符集/语言检测（&lt;0.5ms），推理前选 checkpoint</td><td>—</td></tr>
+</table>
+
+<p>三个官方 checkpoint：</p>
+
+<table>
+<tr><th>Checkpoint</th><th>底座</th><th>参数</th><th>上下文</th><th>擅长</th></tr>
+<tr><td>laya（根）</td><td>ModernBERT-large</td><td>421M</td><td>512</td><td>英文、护栏、邮件分流</td></tr>
+<tr><td>laya-multilingual</td><td>mmBERT-base</td><td>322M</td><td>1024（可扩 8k）</td><td>100+ 语言，快 2.2x</td></tr>
+<tr><td>laya-typed-decisions</td><td>ModernBERT-large</td><td>421M</td><td>1024</td><td>四类决策工作流（0.766）</td></tr>
+</table>
+
+<h2>二、答题机制：选项标记（Option Markers）</h2>
+
+<p>一次请求被拼成"一张考卷"：<b>状态文本</b>（邮件 / 工单 / JSON）+ <b>问题</b>（instructions + criteria），每个候选选项旁挂一个自己的 <b>[MASK] 打分位</b>。</p>
+
+<div class="callout tip">
+<p><b>流程</b>：一次前向读完整张卷子 → 决策头在每个 [MASK] 位读出一个分数（logit）→ 同一题的选项们做 softmax → 概率分布。</p>
+<p>不是"写字"，而是"<b>在每道题的答题框里填把握分</b>"：</p>
+<ul>
+<li><b>choice</b>：billing 0.94 / technical 0.03 / sales 0.03 …</li>
+<li><b>score</b>：期望分 1.84 / 2.0 + 完整分布</li>
+<li><b>noul</b>：P(真) = 0.892</li>
+</ul>
+</div>
+
+<div class="callout warn">
+<p><b>关键设计</b>：选项空间是<b>请求时定义的</b>，不是训练时定死的类别——换 schema、加新选项，<b>不用重新训练</b>。传统分类器做不到这一点（改类别就得重训）。</p>
+</div>
+
+<div class="callout">
+<p><b>预算分割（context bifurcation）</b>：上下文被切成"选项预算" head_max_len + "状态预算"：</p>
+<ul>
+<li>英文：512 总长 = 选项 192 + 状态约 320</li>
+<li>多语：1024 总长 = 选项 256 + 状态约 768</li>
+</ul>
+</div>
+
+<h2>三、为什么能 33 毫秒</h2>
+
+<ul>
+<li><b>没有解码循环</b>：不存在"逐 token 生成 + KV Cache"那套，一次前向把一整张卷子算完</li>
+<li><b>双向编码器</b>：注意力里没有因果 mask，所有 token 互相可见——"理解题"不需要方向性</li>
+<li><b>批量友好</b>：一次调用里的所有问题共享一次前向（10 题 72.3ms = 7.2ms/题，T4）</li>
+</ul>
+
+<table>
+<tr><th>指标（Tesla T4）</th><th>英文 laya</th><th>多语 laya-multilingual</th><th>参考：Jev</th></tr>
+<tr><td>1 题延迟</td><td>39.5 ms</td><td><b>32.8 ms</b></td><td>236–276 ms（p50，第三方测）</td></tr>
+<tr><td>10 题批量</td><td>158.6 ms</td><td><b>72.3 ms（7.2 ms/题）</b></td><td>—</td></tr>
+<tr><td>50 题批量</td><td>771 ms</td><td><b>337 ms（6.8 ms/题）</b></td><td>—</td></tr>
+</table>
+
+<h2>四、训练：RLCD = 严格真评分规则 + REINFORCE</h2>
+
+<p>奖励不是"人类喜欢"（RLHF），也不是"答案可验证"（RLVR），而是<b>严格真评分规则</b>（strictly proper scoring rule）：</p>
+
+<div class="callout tip">
+<p><b>赌局类比</b>：模型对每个选项"押注"一个概率分布，庄家用真实结果结算。虚张声势（说 100% 却错）和过度保守都会亏——<b>只有如实报告自己的真实概率，期望收益才最高</b>。这就是"说 90% 就真是 90%"的来源：不是营销词，是奖励函数设计的直接后果。</p>
+</div>
+
+<ul>
+<li>具体规则：log 分 + 球面分（spherical）；ordinal 打分题另加等级概率分（RPS）</li>
+<li>探索：logits 上加零均值高斯噪声</li>
+<li>更新：REINFORCE + 组均值基线（<b>GRPO 式</b>——和 lesson 0007 学的 GRPO 同源）</li>
+<li>多轮对话：TD(λ=1.0) 在"前缀切片"上回传</li>
+</ul>
+
+<h2>五、校准：概率要"诚"，还要"准"</h2>
+
+<p>出厂 checkpoint 是<b>过度自信</b>的：需要按（题型 × 选项数）在自有数据上拟合一个温度，把 ECE（期望校准误差）压下来：</p>
+
+<table>
+<tr><th>模型</th><th>拟合前 ECE</th><th>拟合后 ECE</th></tr>
+<tr><td>laya（英文）</td><td>0.466</td><td><b>0.081</b></td></tr>
+<tr><td>laya-multilingual</td><td>0.314</td><td>0.106</td></tr>
+</table>
+
+<p class="sidenote">ECE 0.081 ≈ 平均而言，模型报出的概率和实际频率只差约 8 个百分点。同一张对比表里 Jev 的 ECE 是 0.246。校准后的置信度才能用来做"自动放行 / 转人工"的闸门。</p>
+
+<h2>六、Router：为什么路由必须在模型外做</h2>
+
+<div class="callout danger">
+<p>英文 checkpoint 看高棉语：<b>准确率 0.000，置信度 0.952</b>——"自信地全错"。置信度闸门救不了（它偏偏很有自信），所以路由必须在<b>推理之前</b>用非模型手段完成：纯 Python 检测 Unicode 字符集 / 语言（&lt;0.5ms），再分发到对应 checkpoint。</p>
+</div>
+
+<p class="sidenote">生产坑：默认 max_loaded=1，中英交替流量会在每次请求重建模型（CPU 中位 7.4s / T4 10.3s 的重载）；Router(preload=True) 预加载后 → 32.8ms。</p>
+
+<h2>七、边界与弱点（官方自己写的）</h2>
+
+<table>
+<tr><th>弱点</th><th>数字</th><th>原因 / 解法</th></tr>
+<tr><td>选项一多就崩</td><td>Banking77（77 选项）0.425 vs Jev 0.870</td><td>选项预算固定：(256−16)÷77 ≈ 每项 3~4 token，文本互相糊掉；调大 head_max_len / max_len，或"粗筛→精选"两级</td></tr>
+<tr><td>开箱即用 ≈ 随机</td><td>零样本 0.362（随机 0.318 / 多数类 0.461）</td><td>它是"好底座"，不是"开箱即用的决策引擎"——要拿自己的数据微调</td></tr>
+<tr><td>打分题最弱</td><td>SST-5 0.372</td><td>ordinal 是最难的题型（"算几级"比"是不是"难）</td></tr>
+<tr><td>根仓库仅英文</td><td>—</td><td>非英文走 laya-multilingual</td></tr>
+</table>
+
+<h2>八、和已学内容的连接</h2>
+
+<ul>
+<li><b>因果 mask（阶段2 注意力笔记）</b>：LLM 只能看左边（生成需要）；这里双向互见——"理解题"不需要方向性</li>
+<li><b>KV Cache / 逐 token 解码（lesson 0001、0005）</b>：整个解码循环被删掉，一次前向 = 全部答案</li>
+<li><b>softmax</b>：同题选项间的归一化——把"分数"变成"概率"</li>
+<li><b>GRPO（lesson 0007）</b>：RLCD 的更新用 REINFORCE + 组均值基线，就是 GRPO 那一支</li>
+<li><b>温度（lesson 0010）</b>：同一个旋钮，LLM 用它调"随机性"，Laya 用它调"校准"（ECE 0.466 → 0.081）</li>
+</ul>
+
+<h2>九、一行总结</h2>
+
+<div class="card">
+<div class="card-title">答案</div>
+<p>Laya = 把"分类器"的骨头（双向编码器 + 打分 + softmax）装上"现代 LLM 的肌肉"（大参数量、RL 训练、校准概率），再用<b>一次前向</b>换掉整个生成循环——所以快得不讲道理；但它也只干一件事：<b>答题</b>。选项是请求时现写的、概率是训练出来的、路由在推理前就定了。</p>
+</div>
+
+<div class="nav-links">
+<p>⬅️ 上一课：<a href="0013-jev-laya-decision-models.html">Jev 与 Laya：不会写字的决策模型</a></p>
+<p>🔗 相关：<a href="0001-kv-cache.html">KV Cache</a> · <a href="0005-pretrain-training-loop.html">Pretrain 训练循环</a> · <a href="0007-dpo-and-grpo.html">DPO 与 GRPO</a> · <a href="0010-sampling-and-temperature.html">解码采样与温度</a></p>
+</div>
+
+<p class="meta">
+  <span class="tag tag-green">来源</span>
+  HuggingFace 模型卡 convaiinnovations/laya（架构 / 训练 / 基准，含 "Honest Limits"）· GitHub NandhaKishorM/laya · PyPI laya · AI工具集中文拆解（2026-09-22 整理）
+</p>
+
+</div>
+</body>
+</html>
